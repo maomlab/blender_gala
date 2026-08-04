@@ -1,0 +1,470 @@
+"""Geometry construction: dashes, arcs, curve objects and text objects.
+
+Gala draws measurements and interactions as **real 3D geometry** rather than
+viewport overlays (SPECIFICATION D-15), so a hydrogen bond receives light,
+casts shadows, appears in cryptomatte and depth-sorts against the molecule like
+anything else in the scene.
+
+The maths lives in pure-numpy functions at the top of this module so it can be
+tested without Blender; the ``bpy`` layer underneath only turns point lists
+into data blocks.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+
+from . import collections as gala_collections
+
+try:  # pragma: no cover
+    import bpy
+    from mathutils import Vector
+except ImportError:  # pragma: no cover
+    bpy = None  # type: ignore[assignment,misc]
+    Vector = None  # type: ignore[assignment,misc]
+
+__all__ = [
+    "arc_points",
+    "billboard",
+    "dash_segments",
+    "dihedral_arc_points",
+    "make_curve",
+    "make_line",
+    "make_text",
+]
+
+
+# ---------------------------------------------------------------------------
+# Pure geometry
+# ---------------------------------------------------------------------------
+
+
+def dash_segments(
+    start: Any,
+    end: Any,
+    dash_length: float = 0.15,
+    gap_length: float = 0.1,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Split a segment into evenly distributed dashes.
+
+    The dash length is adjusted so that a whole number of dashes spans the
+    segment with a dash at each end. Truncating instead would leave a ragged
+    stub against an atom, which reads as a rendering error in a figure.
+
+    Parameters
+    ----------
+    start, end : sequence of float
+        Segment endpoints, in the same units as ``dash_length``.
+    dash_length : float, optional
+        Desired dash length. Must be positive.
+    gap_length : float, optional
+        Desired gap between dashes. Zero produces a solid line.
+
+    Returns
+    -------
+    list of (numpy.ndarray, numpy.ndarray)
+        Sub-segment endpoints. A degenerate input segment yields an empty list.
+
+    Raises
+    ------
+    ValueError
+        If ``dash_length`` is not positive or ``gap_length`` is negative.
+    """
+    if dash_length <= 0:
+        raise ValueError(f"dash_length must be positive, got {dash_length}")
+    if gap_length < 0:
+        raise ValueError(f"gap_length must not be negative, got {gap_length}")
+
+    p0 = np.asarray(start, dtype=float)
+    p1 = np.asarray(end, dtype=float)
+    span = p1 - p0
+    length = float(np.linalg.norm(span))
+    if length <= 1e-12:
+        return []
+    if gap_length == 0.0:
+        return [(p0, p1)]
+
+    direction = span / length
+    period = dash_length + gap_length
+    n_dashes = max(1, round((length + gap_length) / period))
+    if n_dashes == 1:
+        return [(p0, p1)]
+
+    actual_dash = (length - (n_dashes - 1) * gap_length) / n_dashes
+    if actual_dash <= 0:
+        # Requested gaps do not fit; fall back to a solid line rather than
+        # emitting zero-length dashes.
+        return [(p0, p1)]
+
+    segments = []
+    for i in range(n_dashes):
+        offset = i * (actual_dash + gap_length)
+        segments.append(
+            (p0 + direction * offset, p0 + direction * (offset + actual_dash))
+        )
+    return segments
+
+
+def arc_points(
+    centre: Any,
+    point_a: Any,
+    point_b: Any,
+    radius: float | None = None,
+    resolution: int = 24,
+) -> np.ndarray:
+    """Sample the arc from ``point_a`` to ``point_b`` about ``centre``.
+
+    Used to draw the angle between two rays of a measurement.
+
+    Parameters
+    ----------
+    centre : sequence of float
+        Arc centre (the vertex atom of an angle).
+    point_a, point_b : sequence of float
+        Points defining the two rays. Only their directions matter.
+    radius : float, optional
+        Arc radius. Defaults to 40 % of the shorter ray, which keeps the arc
+        clear of both atoms.
+    resolution : int, optional
+        Number of sampled points. Minimum 2.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(resolution, 3)``. Empty ``(0, 3)`` if the rays are degenerate
+        or exactly collinear, where an arc is undefined.
+    """
+    c = np.asarray(centre, dtype=float)
+    va = np.asarray(point_a, dtype=float) - c
+    vb = np.asarray(point_b, dtype=float) - c
+    na = float(np.linalg.norm(va))
+    nb = float(np.linalg.norm(vb))
+    if na <= 1e-12 or nb <= 1e-12:
+        return np.zeros((0, 3))
+
+    ua = va / na
+    ub = vb / nb
+    cos_angle = float(np.clip(np.dot(ua, ub), -1.0, 1.0))
+    angle = float(np.arccos(cos_angle))
+
+    axis = np.cross(ua, ub)
+    axis_norm = float(np.linalg.norm(axis))
+    if axis_norm <= 1e-9:
+        return np.zeros((0, 3))
+    axis = axis / axis_norm
+
+    if radius is None:
+        radius = 0.4 * min(na, nb)
+
+    steps = max(2, int(resolution))
+    thetas = np.linspace(0.0, angle, steps)
+    # Rodrigues' rotation of ua about axis.
+    cos_t = np.cos(thetas)[:, None]
+    sin_t = np.sin(thetas)[:, None]
+    rotated = (
+        ua[None, :] * cos_t
+        + np.cross(axis, ua)[None, :] * sin_t
+        + axis[None, :] * float(np.dot(axis, ua)) * (1.0 - cos_t)
+    )
+    return c + rotated * radius
+
+
+def dihedral_arc_points(
+    point_a: Any,
+    point_b: Any,
+    point_c: Any,
+    point_d: Any,
+    resolution: int = 24,
+) -> np.ndarray:
+    """Sample the arc representing the dihedral A-B-C-D.
+
+    The arc is drawn about the midpoint of the B-C bond, sweeping from the
+    projection of A to the projection of D onto the plane normal to B-C. That
+    is the standard Newman-projection reading of a torsion.
+
+    Parameters
+    ----------
+    point_a, point_b, point_c, point_d : sequence of float
+        The four atoms of the dihedral.
+    resolution : int, optional
+        Number of sampled points.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(resolution, 3)``, or ``(0, 3)`` if the dihedral is degenerate.
+    """
+    a = np.asarray(point_a, dtype=float)
+    b = np.asarray(point_b, dtype=float)
+    c = np.asarray(point_c, dtype=float)
+    d = np.asarray(point_d, dtype=float)
+
+    axis = c - b
+    axis_norm = float(np.linalg.norm(axis))
+    if axis_norm <= 1e-12:
+        return np.zeros((0, 3))
+    axis = axis / axis_norm
+    centre = 0.5 * (b + c)
+
+    # Components of the outer bonds perpendicular to the central axis.
+    va = (a - b) - np.dot(a - b, axis) * axis
+    vd = (d - c) - np.dot(d - c, axis) * axis
+    if np.linalg.norm(va) <= 1e-12 or np.linalg.norm(vd) <= 1e-12:
+        return np.zeros((0, 3))
+
+    radius = 0.35 * min(float(np.linalg.norm(a - b)), float(np.linalg.norm(d - c)))
+    return arc_points(
+        centre, centre + va, centre + vd, radius=radius, resolution=resolution
+    )
+
+
+# ---------------------------------------------------------------------------
+# Blender object construction
+# ---------------------------------------------------------------------------
+
+
+def _require_bpy() -> Any:
+    if bpy is None:  # pragma: no cover
+        raise RuntimeError("this function must be called from inside Blender")
+    return bpy
+
+
+def make_curve(
+    name: str,
+    polylines: Any,
+    radius: float = 0.01,
+    material: Any = None,
+    collection: str = gala_collections.MEASUREMENTS,
+    gala_type: str = "line",
+    resolution: int = 6,
+    **properties: Any,
+) -> Any:
+    """Create a curve object from one or more polylines.
+
+    A curve with a non-zero ``bevel_depth`` renders as a tube in both EEVEE and
+    Cycles and needs no mesh geometry, which keeps dashed bonds cheap even when
+    there are hundreds of them.
+
+    Parameters
+    ----------
+    name : str
+        Object and data-block name.
+    polylines : sequence of sequence of point
+        Each polyline is a sequence of ``(x, y, z)`` points in world space,
+        Blender units.
+    radius : float, optional
+        Tube radius in Blender units.
+    material : bpy.types.Material, optional
+        Material to assign.
+    collection : str, optional
+        Gala collection to link into.
+    gala_type : str, optional
+        Value for the ``gala_type`` custom property.
+    resolution : int, optional
+        Bevel resolution; 6 is smooth enough at figure scale.
+    **properties
+        Extra custom properties recorded on the object.
+
+    Returns
+    -------
+    bpy.types.Object
+
+    Raises
+    ------
+    ValueError
+        If ``polylines`` contains no usable points.
+    """
+    bpy_mod = _require_bpy()
+
+    usable = [np.asarray(line, dtype=float) for line in polylines]
+    usable = [line for line in usable if line.ndim == 2 and line.shape[0] >= 2]
+    if not usable:
+        raise ValueError(f"{name!r}: no polyline with at least two points")
+
+    curve = bpy_mod.data.curves.new(name, type="CURVE")
+    curve.dimensions = "3D"
+    curve.bevel_depth = radius
+    curve.bevel_resolution = resolution
+    curve.fill_mode = "FULL"
+    curve.use_fill_caps = True
+
+    for line in usable:
+        spline = curve.splines.new("POLY")
+        spline.points.add(len(line) - 1)
+        flat = np.hstack([line, np.ones((line.shape[0], 1))]).ravel()
+        spline.points.foreach_set("co", flat)
+
+    obj = bpy_mod.data.objects.new(name, curve)
+    if material is not None:
+        curve.materials.append(material)
+
+    gala_collections.link_object(obj, collection)
+    gala_collections.tag(obj, gala_type, **properties)
+    return obj
+
+
+def make_line(
+    name: str,
+    start: Any,
+    end: Any,
+    style: str = "dashed",
+    radius: float = 0.01,
+    dash_length: float = 0.15,
+    gap_length: float = 0.1,
+    material: Any = None,
+    collection: str = gala_collections.MEASUREMENTS,
+    gala_type: str = "line",
+    **properties: Any,
+) -> Any:
+    """Create a solid or dashed line between two world-space points.
+
+    Parameters
+    ----------
+    name : str
+        Object name.
+    start, end : sequence of float
+        Endpoints in world space, Blender units.
+    style : {"dashed", "solid"}, optional
+        Dashed is the convention for non-covalent interactions.
+    radius : float, optional
+        Tube radius in Blender units.
+    dash_length, gap_length : float, optional
+        Dash pattern in Blender units. Ignored when ``style="solid"``.
+    material : bpy.types.Material, optional
+        Material to assign.
+    collection : str, optional
+        Gala collection to link into.
+    gala_type : str, optional
+        Value for the ``gala_type`` custom property.
+    **properties
+        Extra custom properties recorded on the object.
+
+    Returns
+    -------
+    bpy.types.Object
+
+    Raises
+    ------
+    ValueError
+        If ``style`` is unknown or the endpoints coincide.
+    """
+    if style not in ("dashed", "solid"):
+        raise ValueError(f"style must be 'dashed' or 'solid', got {style!r}")
+
+    if style == "solid":
+        polylines = [[np.asarray(start, dtype=float), np.asarray(end, dtype=float)]]
+    else:
+        polylines = [
+            list(seg) for seg in dash_segments(start, end, dash_length, gap_length)
+        ]
+
+    if not polylines:
+        raise ValueError(f"{name!r}: start and end coincide, nothing to draw")
+
+    return make_curve(
+        name,
+        polylines,
+        radius=radius,
+        material=material,
+        collection=collection,
+        gala_type=gala_type,
+        **properties,
+    )
+
+
+def make_text(
+    name: str,
+    text: str,
+    location: Any,
+    size: float = 0.1,
+    material: Any = None,
+    align_x: str = "CENTER",
+    align_y: str = "CENTER",
+    extrude: float = 0.0,
+    collection: str = gala_collections.LABELS,
+    gala_type: str = "label",
+    **properties: Any,
+) -> Any:
+    """Create a 3D text object at a world-space location.
+
+    Parameters
+    ----------
+    name : str
+        Object name.
+    text : str
+        Body text. Newlines are honoured.
+    location : sequence of float
+        World-space position in Blender units.
+    size : float, optional
+        Font size in Blender units.
+    material : bpy.types.Material, optional
+        Material to assign; use an emissive one so labels stay readable
+        regardless of the lighting.
+    align_x, align_y : str, optional
+        Blender text alignment enums.
+    extrude : float, optional
+        Extrusion depth; ``0`` keeps the text flat.
+    collection : str, optional
+        Gala collection to link into.
+    gala_type : str, optional
+        Value for the ``gala_type`` custom property.
+    **properties
+        Extra custom properties recorded on the object.
+
+    Returns
+    -------
+    bpy.types.Object
+    """
+    bpy_mod = _require_bpy()
+
+    data = bpy_mod.data.curves.new(name, type="FONT")
+    data.body = text
+    data.size = size
+    data.align_x = align_x
+    data.align_y = align_y
+    data.extrude = extrude
+
+    obj = bpy_mod.data.objects.new(name, data)
+    obj.location = tuple(float(v) for v in location)
+    if material is not None:
+        data.materials.append(material)
+
+    gala_collections.link_object(obj, collection)
+    gala_collections.tag(obj, gala_type, text=text, **properties)
+    return obj
+
+
+def billboard(obj: Any, camera: Any = None) -> Any:
+    """Make ``obj`` always face the camera.
+
+    Uses a ``TRACK_TO`` constraint rather than baking a rotation, so the label
+    keeps facing the camera through an orbit animation.
+
+    Parameters
+    ----------
+    obj : bpy.types.Object
+        Object to constrain.
+    camera : bpy.types.Object, optional
+        Target camera. Defaults to the scene camera; a no-op if there is none.
+
+    Returns
+    -------
+    bpy.types.Object
+        The same object, for chaining.
+    """
+    bpy_mod = _require_bpy()
+    camera = camera or bpy_mod.context.scene.camera
+    if camera is None:
+        return obj
+
+    for existing in list(obj.constraints):
+        if existing.type == "TRACK_TO":
+            obj.constraints.remove(existing)
+
+    constraint = obj.constraints.new("TRACK_TO")
+    constraint.target = camera
+    constraint.track_axis = "TRACK_Z"
+    constraint.up_axis = "UP_Y"
+    return obj

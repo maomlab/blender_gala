@@ -1,0 +1,20 @@
+schema_version = "1.0.0"
+
+id = "blender_gala"
+version = "0.1.0"
+name = "Blender Gala"
+tagline = "Publication figures and measurements for structural biology"
+maintainer = "Blender Gala contributors"
+type = "add-on"
+
+website = "https://github.com/blender-gala/blender_gala"
+
+tags = ["Render", "Scene", "Lighting", "Material"]
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+copyright = ["2026 Blender Gala contributors"]
+
+[permissions]
+files = "Read HDRI files; write rendered images and EXR passes"

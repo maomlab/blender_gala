@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Tooling
+.blender-deps/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+site/
+
+# Blender
+*.blend1
+*.blend2
+
+# Editors and OS
+.DS_Store
+*~
+.vscode/
+.idea/
