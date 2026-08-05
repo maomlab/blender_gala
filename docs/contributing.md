@@ -3,7 +3,7 @@
 ## Setting up
 
 ```bash
-git clone https://github.com/blender-gala/blender_gala
+git clone https://github.com/maomlab/blender_gala
 cd blender_gala
 
 make dev        # ruff, mypy and the docs toolchain, in your system Python

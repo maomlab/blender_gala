@@ -98,7 +98,7 @@ comparisons all work as you would expect.
 
 1. Install Molecular Nodes from *Edit → Preferences → Get Extensions*.
 2. Download `blender_gala-<version>.zip` from the
-   [releases page](https://github.com/blender-gala/blender_gala/releases).
+   [releases page](https://github.com/maomlab/blender_gala/releases).
 3. *Edit → Preferences → Add-ons → ▾ → Install from Disk…* and pick the zip.
 4. Restart Blender. A **Gala** tab appears in the 3D View sidebar (`N`).
 
@@ -109,7 +109,7 @@ extensions putting different versions of the same library on `sys.path`.
 Building from source:
 
 ```bash
-git clone https://github.com/blender-gala/blender_gala
+git clone https://github.com/maomlab/blender_gala
 cd blender_gala
 make build     # -> dist/blender_gala-0.1.0.zip
 make install   # build and install into your Blender
@@ -160,12 +160,12 @@ gala.render("figure.png")
 
 ## Documentation
 
-- [Getting started](https://blender-gala.github.io/blender_gala/guide/getting-started.html)
-- [Selection language reference](https://blender-gala.github.io/blender_gala/guide/selections.html)
-- [Publication scenes](https://blender-gala.github.io/blender_gala/guide/scenes.html)
-- [Interactions and measurement](https://blender-gala.github.io/blender_gala/guide/interactions.html)
-- [Colouring by data](https://blender-gala.github.io/blender_gala/guide/colouring.html)
-- [API reference](https://blender-gala.github.io/blender_gala/api/index.html)
+- [Getting started](https://maomlab.github.io/blender_gala/guide/getting-started.html)
+- [Selection language reference](https://maomlab.github.io/blender_gala/guide/selections.html)
+- [Publication scenes](https://maomlab.github.io/blender_gala/guide/scenes.html)
+- [Interactions and measurement](https://maomlab.github.io/blender_gala/guide/interactions.html)
+- [Colouring by data](https://maomlab.github.io/blender_gala/guide/colouring.html)
+- [API reference](https://maomlab.github.io/blender_gala/api/index.html)
 
 Runnable end-to-end examples live in [`vignettes/`](vignettes/); CI executes
 every one of them, so they cannot drift from the code.

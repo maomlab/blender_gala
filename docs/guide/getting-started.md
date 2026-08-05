@@ -9,7 +9,7 @@ anything that touches a molecule.
 1. *Edit → Preferences → Get Extensions*, search for **Molecular Nodes**,
    install it.
 2. Download `blender_gala-<version>.zip` from the
-   [releases page](https://github.com/blender-gala/blender_gala/releases).
+   [releases page](https://github.com/maomlab/blender_gala/releases).
 3. *Edit → Preferences → Add-ons → ▾ → Install from Disk…*, choose the zip.
 4. Restart Blender.
 

@@ -7,7 +7,7 @@ tagline = "Publication figures and measurements for structural biology"
 maintainer = "Blender Gala contributors"
 type = "add-on"
 
-website = "https://github.com/blender-gala/blender_gala"
+website = "https://github.com/maomlab/blender_gala"
 
 tags = ["Render", "Scene", "Lighting", "Material"]
 

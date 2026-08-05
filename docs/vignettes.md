@@ -1,7 +1,7 @@
 # Vignettes
 
 Runnable end-to-end examples. Each is a standalone script in
-[`vignettes/`](https://github.com/blender-gala/blender_gala/tree/main/vignettes)
+[`vignettes/`](https://github.com/maomlab/blender_gala/tree/main/vignettes)
 that CI executes on every push, so none of them can drift from the code.
 
 Run one:

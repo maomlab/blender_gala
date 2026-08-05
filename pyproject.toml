@@ -33,9 +33,9 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/blender-gala/blender_gala"
-Documentation = "https://blender-gala.github.io/blender_gala"
-Source = "https://github.com/blender-gala/blender_gala"
+Homepage = "https://github.com/maomlab/blender_gala"
+Documentation = "https://maomlab.github.io/blender_gala"
+Source = "https://github.com/maomlab/blender_gala"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,8 +1,8 @@
 site_name: Blender Gala
 site_description: Structural biology visualization tools for Blender
-site_url: https://blender-gala.github.io/blender_gala/
-repo_url: https://github.com/blender-gala/blender_gala
-repo_name: blender-gala/blender_gala
+site_url: https://maomlab.github.io/blender_gala/
+repo_url: https://github.com/maomlab/blender_gala
+repo_name: maomlab/blender_gala
 edit_uri: edit/main/docs/
 
 # Emit `guide/page.html` rather than `guide/page/index.html`. Clean URLs need a
@@ -96,7 +96,7 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/blender-gala/blender_gala
+      link: https://github.com/maomlab/blender_gala
 
 watch:
   - blender_gala

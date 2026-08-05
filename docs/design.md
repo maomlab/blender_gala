@@ -1,7 +1,7 @@
 # Design decisions
 
 Gala is opinionated in a handful of places. The full record lives in
-[`SPECIFICATION.md`](https://github.com/blender-gala/blender_gala/blob/main/SPECIFICATION.md);
+[`SPECIFICATION.md`](https://github.com/maomlab/blender_gala/blob/main/SPECIFICATION.md);
 this page covers the decisions a user is most likely to notice.
 
 ## `Standard`, not `AgX`
