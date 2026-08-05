@@ -15,6 +15,8 @@ anything that touches a molecule.
 
 Press `N` in the 3D View and you should see a **Gala** tab.
 
+![The Gala tab in the 3D View sidebar](../images/ui/sidebar.png){ width="280" }
+
 !!! note "No bundled dependencies"
 
     Gala ships no Python wheels. It uses the numpy that comes with Blender and
@@ -130,6 +132,8 @@ The **Gala** sidebar tab has the same features:
 - **Origin and Camera**, **Lighting and Materials**, **Passes and Compositing**
 - **Interactions**, **Measure**, **Label**, **Colour**
 - **Clean Up** — remove everything Gala added
+
+[The Blender UI](ui.md) shows each of those panels.
 
 Everything Gala creates lives in a `Gala` collection with per-category
 children, so it can be hidden, excluded from a view layer, or deleted as a
