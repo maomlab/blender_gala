@@ -112,5 +112,5 @@ for selections in (
 # ---------------------------------------------------------------------------
 heading("7. Render")
 # ---------------------------------------------------------------------------
-gala.frame_target(mol, viewpoint="iso", margin=1.4)
+gala.frame_target(mol, viewpoint="iso", margin=1.2)
 render(gala, "03_measurements")
