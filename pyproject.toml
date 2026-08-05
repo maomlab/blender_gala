@@ -25,6 +25,9 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "fake-bpy-module>=20240604",
+    # scripts/capture_ui.py crops the panel screenshots outside Blender.
+    "pillow>=10.0",
+    "numpy>=1.24",
 ]
 docs = [
     "mkdocs>=1.6",

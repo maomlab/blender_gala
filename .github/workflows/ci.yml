@@ -74,14 +74,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libsm6
 
+      # --online-mode is required: since 4.2 Blender refuses to reach the
+      # extensions repository without it, package_install fails its poll, and
+      # nothing is installed. Blender also exits 0 when a --python-expr raises,
+      # so neither the `||` below nor the exit code can be trusted — the check
+      # afterwards is what actually tells us whether it worked.
       - name: Install Molecular Nodes
         run: |
-          ~/blender/blender --background --python-expr "
+          ~/blender/blender --background --online-mode --python-expr "
           import bpy
           bpy.ops.extensions.repo_sync(repo_index=0)
           bpy.ops.extensions.package_install(repo_index=0, pkg_id='molecularnodes')
           bpy.ops.wm.save_userpref()
-          " || echo 'Molecular Nodes install failed; MN-dependent tests will skip.'
+          " || true
+          ~/blender/blender --background --python-expr "
+          try:
+              import bl_ext.blender_org.molecularnodes  # noqa: F401
+          except Exception as exc:
+              print(f'::warning::Molecular Nodes did not install ({exc}); its tests will skip.')
+          "
 
       - name: Install test dependencies
         run: ~/blender/blender --background --factory-startup --python scripts/install_deps.py
@@ -131,21 +142,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libsm6
 
+      # As in the test job, but fatal: a vignette cannot run without Molecular
+      # Nodes, so there is nothing to be gained by discovering that one script
+      # at a time.
       - name: Install Molecular Nodes
         run: |
-          ~/blender/blender --background --python-expr "
+          ~/blender/blender --background --online-mode --python-expr "
           import bpy
           bpy.ops.extensions.repo_sync(repo_index=0)
           bpy.ops.extensions.package_install(repo_index=0, pkg_id='molecularnodes')
           bpy.ops.wm.save_userpref()
+          " || true
+          ~/blender/blender --background --python-expr "
+          import sys
+          try:
+              import bl_ext.blender_org.molecularnodes  # noqa: F401
+          except Exception as exc:
+              sys.exit(f'Molecular Nodes did not install: {exc}')
           "
 
       # A tutorial that has drifted from the code is worse than no tutorial
-      # (SPECIFICATION D-22), so every vignette is executed here.
+      # (SPECIFICATION D-22), so every vignette is executed here. Only the
+      # numbered scripts: `_common.py` is the shared helper module.
       - name: Execute every vignette
         run: |
           set -euo pipefail
-          for script in vignettes/*.py; do
+          for script in vignettes/[0-9]*.py; do
             echo "::group::$script"
             ~/blender/blender --background --python "$script"
             echo "::endgroup::"

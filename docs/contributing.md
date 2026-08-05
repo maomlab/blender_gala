@@ -6,14 +6,27 @@
 git clone https://github.com/maomlab/blender_gala
 cd blender_gala
 
-make dev        # ruff, mypy and the docs toolchain, in your system Python
+make venv       # ruff, mypy and the docs toolchain, into .venv
 make dev-deps   # pytest, into .blender-deps for Blender's Python
 ```
 
-If Blender is not on your `PATH` or in the usual place:
+Two toolchains, because there are two interpreters. Everything that does not
+import `bpy` — ruff, mypy, mkdocs, the helper scripts — runs under a Python of
+your own, and `make venv` puts one in `.venv` with the right version. The tests
+run under Blender's interpreter, which is the only one that has `bpy`, and
+`make dev-deps` puts pytest where that interpreter can find it. Neither touches
+the other, and `make clean-all` removes both.
+
+Once `.venv` exists every target uses it without being told; `make help` prints
+which Python and which Blender it resolved to. `make dev` is there if you would
+rather install into an environment you manage yourself.
+
+Three knobs for when the defaults are wrong:
 
 ```bash
-make test BLENDER=/opt/blender/blender
+make test BLENDER=/opt/blender/blender   # Blender is somewhere unusual
+make docs PYTHON=python3.13              # one-off, a different interpreter
+make venv BASE_PYTHON=python3.12         # build the venv from a specific one
 ```
 
 ## The loop
