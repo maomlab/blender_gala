@@ -129,6 +129,48 @@ def load_structure(pdb_code: str, fallback: str = "site.pdb"):
     return molecule
 
 
+def load_alphafold(accession: str, fallback: str = "plddt.pdb"):
+    """Fetch a model from the AlphaFold database, falling back to a fixture.
+
+    The AlphaFold database is keyed by UniProt accession rather than by PDB ID,
+    and it is what puts pLDDT in the B-factor column — the whole point of the
+    colouring this demonstrates. The synthetic fixture has the same B-factors
+    but none of the shape, so it stands in only when there is no network.
+
+    Parameters
+    ----------
+    accession : str
+        UniProt accession, e.g. ``"P04637"``.
+    fallback : str, optional
+        File in ``tests/data`` to use when the fetch fails.
+
+    Returns
+    -------
+    molecularnodes.Molecule
+    """
+    from blender_gala.core import mn as mn_bridge
+
+    module = mn_bridge.require_mn()
+
+    try:
+        molecule = module.Molecule.fetch(accession, database="alphafold")
+    except Exception as exc:
+        path = os.path.join(DATA_DIR, fallback)
+        print(
+            f"  could not fetch AlphaFold {accession} "
+            f"({exc.__class__.__name__}); using {fallback}"
+        )
+        molecule = module.Molecule.load(path)
+    else:
+        from blender_gala.core.entity import AtomStructure
+
+        print(
+            f"  loaded AlphaFold {accession}: "
+            f"{AtomStructure.from_any(molecule).n_atoms} atoms"
+        )
+    return molecule
+
+
 def render(gala, name: str) -> str:
     """Render the current scene into ``docs/images``.
 

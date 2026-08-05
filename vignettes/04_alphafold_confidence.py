@@ -14,20 +14,33 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
-from _common import DATA_DIR, QUALITY, heading, render, setup
+from _common import QUALITY, heading, load_alphafold, render, setup
 
 mn, gala = setup()
 
 # ---------------------------------------------------------------------------
 heading("1. Load a predicted model")
 # ---------------------------------------------------------------------------
-# AlphaFold writes pLDDT into the B-factor column. The fixture sweeps all four
-# confidence bands so every colour appears.
-mol = mn.Molecule.load(os.path.join(DATA_DIR, "plddt.pdb"))
+# Human p53 as AlphaFold predicts it: a confidently folded DNA-binding core
+# between two long disordered arms. That shape is what makes the confidence
+# bands worth looking at — a prediction is rarely uniformly good, and the
+# colouring is how you see which parts to believe.
+#
+# AlphaFold writes pLDDT into the B-factor column, which is why colouring by
+# B-factor and colouring by confidence are the same operation here.
+mol = load_alphafold("P04637")
 mol.add_style("cartoon")
 
 plddt = np.asarray(mol.array.b_factor)
 print(f"  {len(plddt)} atoms, pLDDT {plddt.min():.0f} to {plddt.max():.0f}")
+for label, low, high in [
+    ("very high (>90) ", 90, 100),
+    ("confident (70-90)", 70, 90),
+    ("low (50-70)      ", 50, 70),
+    ("very low (<50)   ", 0, 50),
+]:
+    share = ((plddt > low) & (plddt <= high)).mean()
+    print(f"      {label} {share:5.1%} of atoms")
 
 
 # ---------------------------------------------------------------------------

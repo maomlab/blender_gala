@@ -65,6 +65,8 @@ make test-fast   # only the tests that need no Blender objects
   interaction: a 2.80 Å hydrogen bond at 180°, a salt bridge, a 3.80 Å parallel
   stack, a cation-π, a linear halogen bond, a metal centre.
 - `plddt.pdb` — B-factors sweeping the four AlphaFold confidence bands.
+  Vignette 4 fetches a real AlphaFold model and falls back to this when
+  there is no network, so the bands are exercised either way.
 - `geometry.pdb` — four atoms at exactly 1.500 Å, 90° and −90°.
 
 Because the geometry was placed rather than found, tests assert real numbers

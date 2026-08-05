@@ -46,9 +46,11 @@ value labels, plus what happens when a selection is ambiguous.
 
 ![04_alphafold_confidence](images/04_alphafold_confidence.png)
 
-`04_alphafold_confidence.py` — colour a predicted model by pLDDT with the
-official confidence bands, print the legend, and render only the parts worth
-trusting.
+`04_alphafold_confidence.py` — fetch human p53 from the AlphaFold database,
+colour it by pLDDT with the official confidence bands, print the legend, and
+render only the parts worth trusting. A real prediction rather than a fixture,
+because the point of the bands is that confidence is uneven: p53's DNA-binding
+core comes out dark blue and its disordered arms orange.
 
 ## 5. Compositing passes
 

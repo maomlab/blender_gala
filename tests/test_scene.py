@@ -475,6 +475,37 @@ def test_framing_is_tight_to_the_projected_atoms(site_molecule):
     assert reach > 0.5 / margin - 0.06, f"framing is loose: reach {reach:.3f}"
 
 
+@requires_mn
+def test_framing_centres_the_silhouette(site_molecule):
+    """Aiming at the centroid leaves a band of empty frame down one side.
+
+    site.pdb has a chloride 18 A out while 90% of the atoms are inside 11 A,
+    so its centroid and the middle of its silhouette are not the same place.
+    """
+    import bpy
+    from bpy_extras.object_utils import world_to_camera_view
+    from mathutils import Vector
+
+    from blender_gala.core.entity import AtomStructure
+    from blender_gala.scene import camera, render
+
+    render.set_resolution(800, 800)
+    structure = AtomStructure.from_any(site_molecule)
+
+    obj = camera.frame_target(structure, viewpoint="iso")
+
+    projected = np.array(
+        [
+            world_to_camera_view(bpy.context.scene, obj, Vector(point.tolist()))[:2]
+            for point in structure.world_positions()
+        ]
+    )
+    middle = 0.5 * (projected.max(axis=0) + projected.min(axis=0))
+    assert np.allclose(middle, 0.5, atol=0.01), (
+        f"silhouette sits at {middle}, not the middle of the frame"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Compositing
 # ---------------------------------------------------------------------------

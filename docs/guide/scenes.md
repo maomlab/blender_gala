@@ -205,9 +205,15 @@ The fit is to the atoms as they project from that viewpoint, not to the sphere
 around them, so `margin=1.0` puts the outermost atom on the frame edge and
 `1.15` leaves 15% air. Fitting the bounding sphere — the usual shortcut — backs
 the camera off far enough for the *most distant single atom* in any direction,
-which on a typical protein wastes about half the frame. One atom well away from
-the rest still costs you the whole frame, because it has to be in it: frame a
-selection instead if you would rather it were not.
+which on a typical protein wastes about half the frame.
+
+The camera also aims at the middle of that silhouette rather than at the
+centroid. The two coincide for a symmetrical molecule and separate for one with
+a long tail on one side — an AlphaFold model with disordered arms, say — where
+aiming at the centroid leaves a band of empty frame down the other side. One
+atom well away from the rest still costs you the whole frame either way,
+because it has to be in it: frame a selection instead if you would rather it
+were not.
 
 A turntable:
 

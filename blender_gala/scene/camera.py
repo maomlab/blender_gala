@@ -124,15 +124,15 @@ def _fit_distance(radius: float, camera_data: Any, scene: Any, margin: float) ->
     return float(radius * margin / math.sin(max(half_fov, 1e-3)))
 
 
-def _fit_distance_to_points(
+def _fit_to_points(
     points: np.ndarray,
     centre: np.ndarray,
     basis: tuple[np.ndarray, np.ndarray, np.ndarray],
     camera_data: Any,
     scene: Any,
     margin: float,
-) -> float:
-    """Distance at which every point in ``points`` is inside the frame.
+) -> tuple[np.ndarray, float]:
+    """Where to aim, and from how far, to fit every point in the frame.
 
     Fitting the bounding *sphere* is what a camera helper usually does, and it
     wastes most of the frame: the sphere circumscribes the molecule, so the
@@ -141,20 +141,42 @@ def _fit_distance_to_points(
 
     This projects the atoms onto the camera's own axes instead and solves for
     the distance at which the extreme one lands on the frame edge. A point at
-    depth ``z`` beyond the centre is inside the horizontal field of view while
-    ``|x| <= (d + z) * tan(h)``, so ``d = max(|x| / tan(h) - z)`` over every
-    point and both axes. Perspective is in the ``- z``: atoms nearer the camera
-    need more room than atoms behind the centre.
+    depth ``z`` beyond the aim point is inside the horizontal field of view
+    while ``|x| <= (d + z) * tan(h)``, so ``d = max(|x| / tan(h) - z)`` over
+    every point and both axes. Perspective is in the ``- z``: atoms nearer the
+    camera need more room than atoms behind it.
+
+    The aim point is the middle of the silhouette rather than the centroid.
+    They are the same for a symmetrical molecule and far apart for one with a
+    long tail on one side, where aiming at the centroid leaves a band of empty
+    frame down the other — and, since the fit is to the *worst* offset from the
+    aim point, a wider shot than the molecule needs.
+
+    Returns
+    -------
+    tuple of (numpy.ndarray, float)
+        The point to look at, and the distance to look from.
     """
     right, up, forward = basis
     tan_h, tan_v = _half_fov_tangents(camera_data, scene)
 
     relative = np.asarray(points, dtype=float) - centre
-    x = np.abs(relative @ right) * margin
-    y = np.abs(relative @ up) * margin
+    x = relative @ right
+    y = relative @ up
     depth = relative @ forward
 
-    return float((np.maximum(x / tan_h, y / tan_v) - depth).max())
+    # Recentre across the view axes only: shifting the aim point sideways does
+    # not change how deep anything is, so `depth` still applies.
+    x_middle = 0.5 * (float(x.max()) + float(x.min()))
+    y_middle = 0.5 * (float(y.max()) + float(y.min()))
+    aim = centre + right * x_middle + up * y_middle
+
+    half_width = np.abs(x - x_middle) * margin
+    half_height = np.abs(y - y_middle) * margin
+    distance = float(
+        (np.maximum(half_width / tan_h, half_height / tan_v) - depth).max()
+    )
+    return aim, distance
 
 
 def frame_target(
@@ -239,7 +261,7 @@ def frame_target(
     if points is None or len(points) == 0:
         distance = _fit_distance(radius, camera.data, scene, margin)
     else:
-        distance = _fit_distance_to_points(
+        centre, distance = _fit_to_points(
             points, centre, basis, camera.data, scene, margin
         )
         # Framing the silhouette can put the camera inside a molecule seen
