@@ -375,7 +375,16 @@ the two half-planes and the arc between them.
 
 **D-20. Colours are written to the mesh `Color` attribute** (`FLOAT_COLOR`,
 point domain) — the attribute MN's styles already read — so recolouring works
-with every MN style with no node surgery.
+with every MN style.
+
+One piece of node surgery is unavoidable, and was missing until it was caught
+rendering a whole vignette flat pink. The styles *read* that attribute, but MN's
+tree *writes* it: importing a molecule with a style wires a `Set Color` node
+that stores a generated colour (`Color Common` over a random per-entity colour,
+or `Color pLDDT`) over the mesh's own, between the mesh and the style. Writing
+the attribute is therefore invisible on its own. `write_colors` mutes that node,
+rather than deleting it, so MN's colouring is one click away in the geometry
+nodes editor.
 
 * `color_by_plddt(molecule)` — reads pLDDT from `b_factor`, applies the official
   AlphaFold DB bands: ≥90 `#0053D6` (very high), 70–90 `#65CBF3` (confident),

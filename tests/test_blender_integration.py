@@ -392,6 +392,38 @@ def test_colours_are_written_to_the_attribute_molecular_nodes_reads(plddt_molecu
 
 
 @requires_mn
+def test_colours_survive_the_molecular_nodes_tree(plddt_molecule):
+    """The mesh attribute is not what renders; the evaluated geometry is.
+
+    Molecular Nodes' `Set Color` node stores a generated colour over the mesh
+    attribute on the way to the style, so colouring used to be correct on the
+    mesh and invisible in the render — a whole figure of flat pink.
+    """
+    import bpy
+
+    from blender_gala.color import coloring
+
+    plddt_molecule.add_style("cartoon")
+    coloring.color_by_plddt(plddt_molecule, mode="banded")
+
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    evaluated = plddt_molecule.object.evaluated_get(depsgraph)
+    mesh = evaluated.to_mesh()
+    try:
+        attribute = mesh.color_attributes.get("Color")
+        assert attribute is not None, "the styled geometry carries no colour"
+        buffer = np.empty(len(attribute.data) * 4, dtype=np.float32)
+        attribute.data.foreach_get("color", buffer)
+        distinct = np.unique(np.round(buffer.reshape(-1, 4), 2), axis=0)
+    finally:
+        evaluated.to_mesh_clear()
+
+    # The fixture sweeps all four confidence bands, so a single colour means
+    # the tree overwrote them.
+    assert len(distinct) > 1, f"every atom rendered the same colour: {distinct}"
+
+
+@requires_mn
 def test_selection_limits_which_atoms_are_recoloured(plddt_molecule):
     from blender_gala.color import coloring
 

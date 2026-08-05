@@ -440,6 +440,41 @@ def test_frame_target_fits_the_molecule(site_molecule):
     assert 0.0 <= projected.y <= 1.0
 
 
+@requires_mn
+def test_framing_is_tight_to_the_projected_atoms(site_molecule):
+    """Every atom inside the frame, and one of them near its edge.
+
+    Fitting the bounding sphere instead leaves the molecule filling under half
+    the frame, because the sphere only touches the silhouette where the single
+    most distant atom is.
+    """
+    import bpy
+    from bpy_extras.object_utils import world_to_camera_view
+    from mathutils import Vector
+
+    from blender_gala.core.entity import AtomStructure
+    from blender_gala.scene import camera, render
+
+    render.set_resolution(800, 800)
+    structure = AtomStructure.from_any(site_molecule)
+    margin = 1.15
+
+    obj = camera.frame_target(structure, viewpoint="iso", margin=margin)
+
+    projected = np.array(
+        [
+            world_to_camera_view(bpy.context.scene, obj, Vector(point.tolist()))[:2]
+            for point in structure.world_positions()
+        ]
+    )
+    assert projected.min() >= 0.0 and projected.max() <= 1.0, "an atom fell outside"
+
+    # Half of 1/margin of the frame, measured from the centre: the outermost
+    # atom has to reach it on at least one axis, or the fit is not a fit.
+    reach = np.abs(projected - 0.5).max()
+    assert reach > 0.5 / margin - 0.06, f"framing is loose: reach {reach:.3f}"
+
+
 # ---------------------------------------------------------------------------
 # Compositing
 # ---------------------------------------------------------------------------

@@ -201,6 +201,14 @@ molecule's proportions honest) and backs it off until the molecule fits with
 the given margin. Viewpoints: `front`, `back`, `left`, `right`, `top`,
 `bottom`, `iso`, or an `(azimuth, elevation)` pair in degrees.
 
+The fit is to the atoms as they project from that viewpoint, not to the sphere
+around them, so `margin=1.0` puts the outermost atom on the frame edge and
+`1.15` leaves 15% air. Fitting the bounding sphere — the usual shortcut — backs
+the camera off far enough for the *most distant single atom* in any direction,
+which on a typical protein wastes about half the frame. One atom well away from
+the rest still costs you the whole frame, because it has to be in it: frame a
+selection instead if you would rather it were not.
+
 A turntable:
 
 ```python

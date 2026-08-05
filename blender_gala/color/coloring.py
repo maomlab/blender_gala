@@ -2,7 +2,13 @@
 
 Colours are written to the mesh ``Color`` attribute (SPECIFICATION D-20) — the
 same attribute Molecular Nodes' styles already read — so a recoloured molecule
-renders correctly in every style with no node-graph surgery.
+renders correctly in every style.
+
+That attribute is read by the styles but *written* by the node tree: importing
+a molecule with a style wires a ``Set Color`` node that stores a generated
+colour over it. So writing the attribute is not on its own enough to change
+what renders, and :func:`write_colors` mutes that node. See
+:func:`_release_mn_color_override`.
 
 The primary test case from the objectives is AlphaFold pLDDT confidence, which
 :func:`color_by_plddt` reproduces using the official AlphaFold DB bands.
@@ -39,6 +45,50 @@ __all__ = [
 ]
 
 _COLOR_ATTRIBUTE = "Color"
+
+#: Molecular Nodes' node group that stores a generated colour over the mesh's
+#: own ``Color`` attribute on the way to the style.
+_MN_COLOR_SETTER = "Set Color"
+
+
+def _release_mn_color_override(obj: Any) -> int:
+    """Stop Molecular Nodes' node tree overwriting the colours just written.
+
+    Importing a molecule with a style builds a ``Set Color`` node fed by a
+    colour generator — ``Color Common`` over a random per-entity colour, or
+    ``Color pLDDT``. It *stores* that into the ``Color`` attribute between the
+    mesh and the style, so anything written to the mesh is overwritten before
+    anything can read it, and every colouring call here is invisible in the
+    render while looking perfectly correct on the mesh.
+
+    Muting the node is the smallest way out: geometry passes straight through,
+    the colours with it. Muting rather than deleting leaves a visibly disabled
+    node in the tree, so Molecular Nodes' own colouring is one click away
+    rather than gone.
+
+    Parameters
+    ----------
+    obj : bpy.types.Object
+        The molecule's object.
+
+    Returns
+    -------
+    int
+        How many nodes were muted.
+    """
+    muted = 0
+    for modifier in getattr(obj, "modifiers", ()):
+        tree = getattr(modifier, "node_group", None)
+        if tree is None:
+            continue
+        for node in tree.nodes:
+            group = getattr(node, "node_tree", None)
+            if group is None or group.name != _MN_COLOR_SETTER:
+                continue
+            if not node.mute:
+                node.mute = True
+                muted += 1
+    return muted
 
 
 @dataclass
@@ -91,6 +141,12 @@ def write_colors(
     -------
     int
         Number of atoms written.
+
+    Notes
+    -----
+    Also mutes Molecular Nodes' ``Set Color`` node on the target, which would
+    otherwise store a generated colour over what is written here before any
+    style could read it.
 
     Raises
     ------
@@ -146,6 +202,7 @@ def write_colors(
         written = int(indices.size)
 
     attribute.data.foreach_set("color", current.astype(np.float32).ravel())
+    _release_mn_color_override(obj)
     mesh.update()
     obj.update_tag()
     bpy_mod.context.view_layer.update()

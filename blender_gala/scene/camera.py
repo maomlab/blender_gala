@@ -4,6 +4,10 @@ Molecular Nodes' ``Camera`` helper adjusts an existing camera. Gala adds the
 part that matters when you have just imported a structure and there is either
 no camera or one pointing at nothing: put a camera somewhere sensible and frame
 the molecule so it fills the frame with a predictable margin.
+
+"Fills the frame" means the atoms as they project from the chosen viewpoint.
+Molecules are not spherical, and fitting the sphere around one — the usual
+shortcut, and what this did first — leaves it filling under half the frame.
 """
 
 from __future__ import annotations
@@ -81,29 +85,76 @@ def ensure_camera(scene: Any = None, lens: float = 85.0) -> Any:
     return obj
 
 
-def _fit_distance(radius: float, camera_data: Any, scene: Any, margin: float) -> float:
-    """Distance at which a sphere of ``radius`` fits the frame."""
+def _half_fov_tangents(camera_data: Any, scene: Any) -> tuple[float, float]:
+    """Return ``(horizontal, vertical)`` half-field-of-view tangents.
+
+    Both axes, rather than the narrower one, because a molecule is not round:
+    which axis it runs out of room in depends on how it is turned.
+    """
     render = scene.render
     width = render.resolution_x * render.pixel_aspect_x
     height = render.resolution_y * render.pixel_aspect_y
+    aspect = (width / height) if height else 1.0
+    lens = max(camera_data.lens, 1e-6)
 
     sensor_fit = camera_data.sensor_fit
-    if sensor_fit == "VERTICAL":
-        sensor = camera_data.sensor_height
-        extent = height
-    elif sensor_fit == "HORIZONTAL":
-        sensor = camera_data.sensor_width
-        extent = width
-    else:  # AUTO: the larger image dimension uses the sensor width
-        sensor = camera_data.sensor_width
-        extent = max(width, height)
+    if sensor_fit == "VERTICAL" or (sensor_fit == "AUTO" and height > width):
+        sensor = (
+            camera_data.sensor_height
+            if sensor_fit == "VERTICAL"
+            else camera_data.sensor_width
+        )
+        tan_v = sensor / (2.0 * lens)
+        tan_h = tan_v * aspect
+    else:  # HORIZONTAL, or AUTO where the width is the larger dimension
+        tan_h = camera_data.sensor_width / (2.0 * lens)
+        tan_v = tan_h / aspect if aspect else tan_h
 
-    # Half-angle of the *narrower* of the two field-of-view axes, so the
-    # molecule fits in both directions rather than being cropped in one.
-    aspect = min(width, height) / extent if extent else 1.0
-    half_fov = math.atan((sensor * aspect) / (2.0 * camera_data.lens))
-    half_fov = max(half_fov, 1e-3)
-    return float(radius * margin / math.sin(half_fov))
+    return max(tan_h, 1e-6), max(tan_v, 1e-6)
+
+
+def _fit_distance(radius: float, camera_data: Any, scene: Any, margin: float) -> float:
+    """Distance at which a sphere of ``radius`` fits the frame.
+
+    The fallback for targets whose individual points are not available. A
+    sphere is tangent to the frustum rather than spanning it, hence ``sin``.
+    """
+    tan_h, tan_v = _half_fov_tangents(camera_data, scene)
+    half_fov = math.atan(min(tan_h, tan_v))
+    return float(radius * margin / math.sin(max(half_fov, 1e-3)))
+
+
+def _fit_distance_to_points(
+    points: np.ndarray,
+    centre: np.ndarray,
+    basis: tuple[np.ndarray, np.ndarray, np.ndarray],
+    camera_data: Any,
+    scene: Any,
+    margin: float,
+) -> float:
+    """Distance at which every point in ``points`` is inside the frame.
+
+    Fitting the bounding *sphere* is what a camera helper usually does, and it
+    wastes most of the frame: the sphere circumscribes the molecule, so the
+    silhouette only touches it where the single most distant atom is. On the
+    vignette structures that left the molecule filling under half the width.
+
+    This projects the atoms onto the camera's own axes instead and solves for
+    the distance at which the extreme one lands on the frame edge. A point at
+    depth ``z`` beyond the centre is inside the horizontal field of view while
+    ``|x| <= (d + z) * tan(h)``, so ``d = max(|x| / tan(h) - z)`` over every
+    point and both axes. Perspective is in the ``- z``: atoms nearer the camera
+    need more room than atoms behind the centre.
+    """
+    right, up, forward = basis
+    tan_h, tan_v = _half_fov_tangents(camera_data, scene)
+
+    relative = np.asarray(points, dtype=float) - centre
+    x = np.abs(relative @ right) * margin
+    y = np.abs(relative @ up) * margin
+    depth = relative @ forward
+
+    return float((np.maximum(x / tan_h, y / tan_v) - depth).max())
 
 
 def frame_target(
@@ -123,8 +174,9 @@ def frame_target(
         A key of :data:`VIEWPOINTS`, or an ``(azimuth, elevation)`` pair in
         degrees.
     margin : float, optional
-        Extra room around the molecule. ``1.0`` is a tight fit; the default
-        leaves a little air so atoms do not touch the frame edge.
+        Extra room around the molecule, as a multiple of its projected extent.
+        ``1.0`` puts the outermost atom exactly on the frame edge; the default
+        leaves a little air so atoms do not touch it.
     camera : bpy.types.Object, optional
         Camera to move. Defaults to the scene camera, created if absent.
     scene : bpy.types.Scene, optional
@@ -161,22 +213,43 @@ def frame_target(
         azimuth, elevation = float(angles[0]), float(angles[1])
 
     centre, radius = _target_bounds(target, scene)
-    distance = _fit_distance(radius, camera.data, scene, margin)
 
+    # The viewing direction does not depend on how far away the camera ends up,
+    # so it is fixed first and the distance solved for along it.
     az = math.radians(azimuth)
     el = math.radians(elevation)
-    horizontal = distance * math.cos(el)
-    offset = np.array(
+    unit = np.array(
         [
-            horizontal * math.sin(az),
-            -horizontal * math.cos(az),
-            distance * math.sin(el),
+            math.cos(el) * math.sin(az),
+            -math.cos(el) * math.cos(az),
+            math.sin(el),
         ]
     )
 
+    # The camera's own axes, taken from the orientation it will be given, so
+    # the projection below is the one the render will use.
+    orientation = Vector((-unit).tolist()).to_track_quat("-Z", "Y")
+    basis = (
+        np.array(orientation @ Vector((1.0, 0.0, 0.0))),  # right
+        np.array(orientation @ Vector((0.0, 1.0, 0.0))),  # up
+        np.array(orientation @ Vector((0.0, 0.0, -1.0))),  # forward
+    )
+
+    points = _subject_points(target, scene)
+    if points is None or len(points) == 0:
+        distance = _fit_distance(radius, camera.data, scene, margin)
+    else:
+        distance = _fit_distance_to_points(
+            points, centre, basis, camera.data, scene, margin
+        )
+        # Framing the silhouette can put the camera inside a molecule seen
+        # end-on, where the extent across the view is small and the extent
+        # along it is not.
+        distance = max(distance, radius * 1.25)
+
+    offset = unit * distance
     camera.location = tuple(float(v) for v in (centre + offset))
-    direction = Vector((-offset).tolist())
-    camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+    camera.rotation_euler = orientation.to_euler()
 
     camera.data.clip_start = max(1e-4, distance - radius * 4.0)
     camera.data.clip_end = distance + radius * 8.0
@@ -189,6 +262,44 @@ def _target_bounds(target: Any, scene: Any) -> tuple[np.ndarray, float]:
     from .lighting import _subject_bounds
 
     return _subject_bounds(target, scene)
+
+
+def _subject_points(target: Any, scene: Any) -> np.ndarray | None:
+    """World-space points to fit in the frame, or ``None`` if there are none.
+
+    Atom positions when the target is a molecule, and bounding-box corners
+    otherwise: a box is still a much closer fit than the sphere around it.
+    """
+    from ..core.entity import AtomStructure
+
+    if target is not None:
+        try:
+            structure = AtomStructure.from_any(target)
+        except Exception:
+            structure = None
+        if structure is not None and structure.n_atoms and structure.object is not None:
+            return structure.world_positions()
+
+    if bpy is None:
+        return None
+
+    if isinstance(target, bpy.types.Object):
+        objects = [target]
+    elif target is None:
+        objects = [
+            obj
+            for obj in scene.objects
+            if obj.type == "MESH" and not obj.get("gala") and obj.visible_get()
+        ]
+    else:
+        return None
+
+    corners = [
+        np.array(obj.matrix_world @ Vector(corner))
+        for obj in objects
+        for corner in obj.bound_box
+    ]
+    return np.asarray(corners) if corners else None
 
 
 def orbit(

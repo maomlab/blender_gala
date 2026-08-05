@@ -133,7 +133,9 @@ gala.label_hud(mol, "Ligand binding site", location=(0.04, 0.95), size=28)
 # ---------------------------------------------------------------------------
 heading("6. Frame the site rather than the whole protein")
 # ---------------------------------------------------------------------------
-gala.frame_target(mol, viewpoint="iso", margin=1.3)
+# The margin only has to clear the labels and dashes drawn around the
+# molecule; the framing itself is now tight to the atoms.
+gala.frame_target(mol, viewpoint="iso", margin=1.15)
 gala.depth_of_field(mol, fstop=4.0)
 
 
