@@ -21,9 +21,15 @@ mn, gala = setup()
 heading("1. Load and style the molecule")
 # ---------------------------------------------------------------------------
 # Molecular Nodes owns import and styling. Gala never duplicates that.
+#
+# A style's `selection` is the name of a boolean attribute on the mesh, not a
+# Gala selection string: Molecular Nodes reads it inside geometry nodes, where
+# Gala's parser is not running. Naming one that does not exist warns and draws
+# nothing at all, so the names here are attributes Molecular Nodes creates on
+# import.
 mol = load_structure("1ake")
-mol.add_style("cartoon", selection="polymer")
-mol.add_style("ball_and_stick", selection="not polymer")
+mol.add_style("cartoon", selection="is_peptide")
+mol.add_style("ball_and_stick", selection="is_hetero")
 
 print(f"  chains  : {sorted(set(mol.array.chain_id))}")
 print(

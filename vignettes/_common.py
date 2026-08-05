@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGE_DIR = os.path.join(REPO_ROOT, "docs", "images")
@@ -24,6 +25,31 @@ if REPO_ROOT not in sys.path:
 
 #: Set GALA_VIGNETTE_QUALITY=figure for publication-resolution output.
 QUALITY = os.environ.get("GALA_VIGNETTE_QUALITY", "draft")
+
+#: A render this uniform has nothing in it. Fractions of the 0-1 pixel range.
+_FLAT_TOLERANCE = 0.01
+
+
+def _die_on_unhandled_exception() -> None:
+    """Make an unhandled exception stop the run with a non-zero exit code.
+
+    Blender prints the traceback from a ``--python`` script and then exits 0
+    regardless, so a vignette that dies half way through is indistinguishable
+    from one that finished — to CI, to ``make vignettes``, and to whoever is
+    reading the log. Only an explicit exit code gets out of Blender, so that is
+    what the hook does.
+    """
+
+    def hook(exc_type, value, tb):
+        traceback.print_exception(exc_type, value, tb)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
+
+    sys.excepthook = hook
+
+
+_die_on_unhandled_exception()
 
 
 def heading(text: str) -> None:
@@ -121,5 +147,45 @@ def render(gala, name: str) -> str:
     os.makedirs(IMAGE_DIR, exist_ok=True)
     path = os.path.join(IMAGE_DIR, f"{name}.png")
     gala.render(path)
+    check_not_blank(path)
     print(f"  wrote {path}")
     return path
+
+
+def check_not_blank(path: str) -> None:
+    """Raise if the rendered image is a single flat colour.
+
+    The ways a vignette produces an empty figure are all silent: a style whose
+    selection names an attribute that does not exist draws nothing but only
+    warns, and a depth cue whose range misses the molecule fades the whole
+    frame to the background colour. Neither stops the script, so without this
+    the vignette "passes" and ships a blank figure.
+
+    Parameters
+    ----------
+    path : str
+        The rendered image.
+
+    Raises
+    ------
+    ValueError
+        If every pixel is the same colour.
+    """
+    import bpy
+    import numpy as np
+
+    image = bpy.data.images.load(path)
+    try:
+        pixels = np.empty(len(image.pixels), dtype=np.float32)
+        image.pixels.foreach_get(pixels)
+    finally:
+        bpy.data.images.remove(image)
+
+    spread = float(np.ptp(pixels.reshape(-1, 4), axis=0).max())
+    if spread < _FLAT_TOLERANCE:
+        raise ValueError(
+            f"{os.path.basename(path)} is one flat colour (spread {spread:.4f}): "
+            "nothing rendered. Check that every style selection names an "
+            "attribute that exists, and that the camera and depth cue bracket "
+            "the molecule."
+        )
