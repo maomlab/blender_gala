@@ -2,7 +2,17 @@
 
 Colours are written to the mesh `Color` attribute — the attribute Molecular
 Nodes' styles already read — so a recoloured molecule renders correctly in
-every style with no node-graph surgery.
+every style.
+
+!!! note "One node gets switched off"
+
+    The styles read that attribute, but the node tree *writes* it: importing a
+    molecule with a style wires a **Set Color** node that stores a generated
+    colour over the mesh's own, between the mesh and the style. Writing the
+    attribute alone would therefore change nothing you can see, so Gala mutes
+    that node the first time you colour a molecule. It is muted rather than
+    deleted — switch it back on in the geometry nodes editor to return to
+    Molecular Nodes' colouring.
 
 ## AlphaFold confidence
 

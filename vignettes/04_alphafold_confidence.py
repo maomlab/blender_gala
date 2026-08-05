@@ -45,6 +45,8 @@ for label, rgb in result.legend:
 # The 0-1 and 0-100 conventions are both handled; ColabFold writes 0-1.
 print("\n  Colours are written to the mesh 'Color' attribute, which is the one")
 print("  Molecular Nodes styles already read, so every style picks them up.")
+print("  Writing it also mutes MN's 'Set Color' node, which would otherwise")
+print("  store a generated colour over these on the way to the style.")
 
 
 # ---------------------------------------------------------------------------
