@@ -63,7 +63,12 @@ wheels are bundled.
 | | |
 | --- | --- |
 | Blender | 4.2 LTS or newer |
-| Molecular Nodes | 4.5 or newer, for anything molecule-aware |
+| Molecular Nodes | 4.4 or newer, for anything molecule-aware |
 | Python dependencies | none bundled |
+
+Which Molecular Nodes you get is decided by which Blender you run: 4.5 needs
+Blender 5.1, so on Blender 4.2 the newest installable is 4.4. Everything works
+on both except [2D overlay labels](guide/measurement.md#2d-overlay-labels),
+which need the annotation manager added in 4.5.
 
 [mn]: https://bradyajohnston.github.io/MolecularNodes

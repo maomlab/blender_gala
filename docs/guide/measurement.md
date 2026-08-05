@@ -137,6 +137,13 @@ over the render, so it is never occluded and never changes size with the
 camera. Right for titles and captions; use `label()` for anything that must sit
 *in* the scene.
 
+!!! note "Needs Molecular Nodes 4.5"
+
+    This is the one thing here that the oldest supported Blender cannot do. The
+    annotation manager arrived in Molecular Nodes 4.5, which needs Blender 5.1,
+    so on Blender 4.2 — where the newest installable Molecular Nodes is 4.4 —
+    `label_hud` raises and says so. `label()` works everywhere.
+
 ```python
 gala.clear_labels()
 ```

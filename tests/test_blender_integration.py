@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import numpy as np
 import pytest
 
@@ -350,9 +352,33 @@ def test_label_validation(site_molecule):
 def test_label_hud_registers_an_annotation(site_molecule):
     from blender_gala.annotate import labels
 
+    if not hasattr(site_molecule, "annotations"):
+        # The annotation manager arrived in Molecular Nodes 4.5, which needs
+        # Blender 5.1. On Blender 4.2 the newest installable is 4.4, so this
+        # is a feature the oldest supported Blender cannot have rather than
+        # something to fix.
+        pytest.skip("needs a Molecular Nodes with the annotation manager (4.5+)")
+
     annotation = labels.label_hud(site_molecule, "Figure 1", size=32)
     assert annotation.text == "Figure 1"
     assert annotation.text_size == 32
+
+
+@requires_mn
+def test_label_hud_says_why_when_annotations_are_missing(site_molecule):
+    """The old message blamed the caller for passing the wrong object.
+
+    On Blender 4.2 they have passed exactly the right one and the build simply
+    cannot do it, so the message should say which version can, rather than send
+    them looking for a mistake they did not make.
+    """
+    from blender_gala.annotate import labels
+
+    with contextlib.suppress(AttributeError):
+        del site_molecule.annotations  # a build that predates the manager
+
+    with pytest.raises(TypeError, match=r"4\.5"):
+        labels.label_hud(site_molecule, "Figure 1")
 
 
 @requires_mn

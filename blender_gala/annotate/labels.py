@@ -355,7 +355,25 @@ def label_hud(
     molecule = target
     if isinstance(target, AtomStructure):
         molecule = target.molecule
-    if molecule is None or not hasattr(molecule, "annotations"):
+    if molecule is not None and mn_bridge.is_molecule(molecule):
+        # A molecule, but from a build that predates annotations: the manager
+        # arrived in Molecular Nodes 4.5, which needs Blender 5.1. On Blender
+        # 4.2 the newest installable is 4.4, so this is the one feature the
+        # oldest supported Blender cannot have.
+        if not hasattr(molecule, "annotations"):
+            installed = mn_bridge.version()
+            named = (
+                "Molecular Nodes " + ".".join(str(part) for part in installed)
+                if installed
+                else "This Molecular Nodes build"
+            )
+            raise TypeError(
+                f"{named} has no annotation manager, so it cannot draw a 2D "
+                "overlay. The manager arrived in Molecular Nodes 4.5, which "
+                "needs Blender 5.1 or newer. Use label() for an in-scene 3D "
+                "label instead."
+            )
+    else:
         raise TypeError(
             "label_hud needs a Molecular Nodes entity with an annotation "
             "manager. Pass the Molecule returned by mn.Molecule.load(), or use "
