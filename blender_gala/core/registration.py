@@ -39,11 +39,14 @@ def _require_bpy() -> Any:
 def is_registered(cls: type) -> bool:
     """Return whether ``cls`` is currently registered with Blender.
 
-    A registered class has an ``bl_rna`` attribute of its own; an unregistered
-    one inherits nothing useful, which is what ``unregister_class`` complains
-    about.
+    A registered class has a ``bl_rna`` of its own, and it has to be looked for
+    in the class's *own* ``__dict__``. Every Blender base class has a ``bl_rna``
+    too, so ``getattr`` finds ``PropertyGroup``'s or ``Panel``'s and answers
+    True for a class that was never registered. Blender's own
+    ``RNAMeta.is_registered`` checks the same way, and this is the check both
+    guards below depend on being right.
     """
-    return getattr(cls, "bl_rna", None) is not None
+    return "bl_rna" in cls.__dict__
 
 
 def register_classes(classes: Sequence[type]) -> list[type]:
