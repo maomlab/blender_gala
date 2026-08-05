@@ -9,9 +9,22 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 PACKAGE   := blender_gala
-VERSION   := $(shell python3 -c "import tomllib,sys; print(tomllib.load(open('$(PACKAGE)/blender_manifest.toml','rb'))['version'])")
 DIST      := dist
 DEPS_DIR  := .blender-deps
+
+# Read by hand rather than with tomllib: this runs on every invocation of make,
+# including `make help`, and tomllib needs Python 3.11. Reading it with an
+# interpreter that turns out to be older printed a traceback before every
+# target and left the version blank.
+VERSION := $(shell sed -n 's/^version *= *"\(.*\)"/\1/p' $(PACKAGE)/blender_manifest.toml)
+
+# The toolchain that runs outside Blender: ruff, mypy, mkdocs, and the helper
+# scripts. Needs 3.11 or newer, per `requires-python`. Override it when the
+# default `python3` is older or is a conda base you would rather not install
+# into:
+#
+#     make docs PYTHON=python3.13
+PYTHON ?= python3
 
 # Locate Blender: an explicit BLENDER wins, then PATH, then the usual
 # per-platform install locations.
@@ -35,6 +48,7 @@ help: ## Show this help
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 	@echo
 	@echo "Blender: $(if $(BLENDER),$(BLENDER),NOT FOUND — set BLENDER=/path/to/blender)"
+	@echo "Python : $(PYTHON) ($(shell $(PYTHON) -V 2>&1 || echo NOT FOUND))"
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -46,13 +60,20 @@ check-blender:
 	  echo "Blender not found. Set BLENDER=/path/to/blender"; exit 1; \
 	fi
 
+.PHONY: check-python
+check-python:
+	@$(PYTHON) -c "import sys; sys.exit(sys.version_info < (3, 11))" 2>/dev/null || { \
+	  echo "$(PYTHON) is $$($(PYTHON) -V 2>&1); this project needs 3.11 or newer."; \
+	  echo "Point PYTHON at a newer one, e.g. PYTHON=python3.13"; exit 1; \
+	}
+
 .PHONY: dev-deps
 dev-deps: check-blender ## Install pytest into .blender-deps for Blender's Python
 	$(BLENDER_RUN) --python scripts/install_deps.py
 
 .PHONY: dev
-dev: ## Install the linting and docs toolchain into the system Python
-	python3 -m pip install --upgrade -e ".[dev,docs]"
+dev: check-python ## Install the linting and docs toolchain into PYTHON
+	$(PYTHON) -m pip install --upgrade -e ".[dev,docs]"
 
 # ---------------------------------------------------------------------------
 # Quality
@@ -91,7 +112,7 @@ coverage: check-blender ## Run the suite with a coverage report
 
 .PHONY: fixtures
 fixtures: ## Regenerate the synthetic test structures
-	python3 tests/data/make_fixtures.py
+	$(PYTHON) tests/data/make_fixtures.py
 
 .PHONY: check
 check: lint typecheck test ## Everything CI runs
@@ -100,29 +121,40 @@ check: lint typecheck test ## Everything CI runs
 # Documentation
 # ---------------------------------------------------------------------------
 
+# Run mkdocs as a module of $(PYTHON) rather than as whatever `mkdocs` is on
+# PATH, so it is the same interpreter `make dev` installed it into.
+.PHONY: check-mkdocs
+check-mkdocs:
+	@$(PYTHON) -c "import mkdocs" 2>/dev/null || { \
+	  echo "mkdocs is not installed for $(PYTHON). Run: make dev"; \
+	  echo "(or point PYTHON at the interpreter that has it)"; exit 1; \
+	}
+
 .PHONY: docs
-docs: ## Build the documentation site into site/ and verify its links
-	mkdocs build --strict
-	python3 scripts/check_links.py
+docs: check-mkdocs ## Build the documentation site into site/ and verify its links
+	$(PYTHON) -m mkdocs build --strict
+	$(PYTHON) scripts/check_links.py
 
 .PHONY: docs-links
 docs-links: ## Check that every internal link in site/ resolves
-	python3 scripts/check_links.py
+	$(PYTHON) scripts/check_links.py
 
 .PHONY: docs-serve
-docs-serve: ## Serve the documentation with live reload
-	mkdocs serve
+docs-serve: check-mkdocs ## Serve the documentation with live reload
+	$(PYTHON) -m mkdocs serve
 
+# Only the numbered scripts: `_common.py` is the shared helper module, and
+# running it as a vignette renders nothing and proves nothing.
 .PHONY: vignettes
 vignettes: check-blender ## Run every vignette and render its images
-	@for script in vignettes/*.py; do \
+	@for script in vignettes/[0-9]*.py; do \
 	  echo "=== $$script"; \
 	  $(BLENDER) --background --python "$$script" || exit 1; \
 	done
 
 .PHONY: ui-shots
 ui-shots: check-blender ## Recapture the sidebar screenshots in docs/images/ui
-	BLENDER="$(BLENDER)" python3 scripts/capture_ui.py
+	BLENDER="$(BLENDER)" $(PYTHON) scripts/capture_ui.py
 
 # ---------------------------------------------------------------------------
 # Packaging
@@ -146,9 +178,13 @@ install: build ## Install the built extension into your Blender
 	    filepath=sorted(glob.glob('$(DIST)/*.zip'))[-1], repo='user_default', \
 	    enable_on_install=True)"
 
+# docs/images/passes holds the multilayer EXRs vignette 5 writes beside the
+# figures. Generated, gitignored, and several megabytes, so it goes with the
+# rest of the build output rather than lingering as untracked files.
 .PHONY: clean
 clean: ## Remove build output and caches
-	rm -rf $(DIST) site htmlcov .coverage .pytest_cache .mypy_cache .ruff_cache
+	rm -rf $(DIST) site htmlcov .coverage .pytest_cache .mypy_cache .ruff_cache \
+	  docs/images/passes
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +
 
 .PHONY: clean-all

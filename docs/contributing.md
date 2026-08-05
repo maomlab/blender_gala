@@ -10,10 +10,14 @@ make dev        # ruff, mypy and the docs toolchain, in your system Python
 make dev-deps   # pytest, into .blender-deps for Blender's Python
 ```
 
-If Blender is not on your `PATH` or in the usual place:
+Two knobs, for when the defaults are wrong. `BLENDER` if Blender is not on your
+`PATH` or in the usual place, and `PYTHON` if your `python3` is older than 3.11
+or is a base environment you would rather not install into — `make help` prints
+what both currently resolve to.
 
 ```bash
 make test BLENDER=/opt/blender/blender
+make dev PYTHON=python3.13
 ```
 
 ## The loop
