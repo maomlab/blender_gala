@@ -69,10 +69,15 @@ jobs:
           mkdir -p ~/blender
           tar -xf blender.tar.xz -C ~/blender --strip-components=1
 
+      # libegl1 and its Mesa driver are what let Blender make a GPU context
+      # with no display. Without them it prints "Couldn't open libEGL.so.1"
+      # and aborts as soon as anything renders — Blender 5 runs the compositor
+      # on the GPU even when Cycles is on the CPU.
       - name: System libraries Blender needs headlessly
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libsm6
+          sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 \
+            libgl1 libsm6 libegl1 libegl-mesa0
 
       # --online-mode is required: Blender refuses to reach the extensions
       # repository without it, package_install fails its poll, and nothing is
@@ -137,10 +142,15 @@ jobs:
           mkdir -p ~/blender
           tar -xf blender.tar.xz -C ~/blender --strip-components=1
 
+      # libegl1 and its Mesa driver are what let Blender make a GPU context
+      # with no display. Without them it prints "Couldn't open libEGL.so.1"
+      # and aborts as soon as anything renders — Blender 5 runs the compositor
+      # on the GPU even when Cycles is on the CPU.
       - name: System libraries Blender needs headlessly
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libsm6
+          sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 \
+            libgl1 libsm6 libegl1 libegl-mesa0
 
       # As in the test job, but fatal: a vignette cannot run without Molecular
       # Nodes, so there is nothing to be gained by discovering that one script
