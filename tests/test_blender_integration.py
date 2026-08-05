@@ -673,6 +673,31 @@ def test_registration_survives_a_second_copy(clean_scene):
     assert unregister_classes(panels.classes) == 0
 
 
+def test_is_registered_reports_this_class_not_its_base(clean_scene):
+    """``bl_rna`` has to be looked for in the class's own ``__dict__``.
+
+    Every Blender base class has a ``bl_rna``, so an inherited lookup answers
+    True for every class, registered or not. That made both guards in this
+    module dead code: `register_classes` called `unregister_class` on classes
+    that were not registered, which segfaults Blender 4.2.
+    """
+    from blender_gala.core.registration import (
+        is_registered,
+        register_classes,
+        unregister_classes,
+    )
+    from blender_gala.ui import panels
+
+    cls = panels.classes[0]
+    unregister_classes([cls])  # whatever ran before, start from unregistered
+
+    assert not is_registered(cls)
+    register_classes([cls])
+    assert is_registered(cls)
+    unregister_classes([cls])
+    assert not is_registered(cls)
+
+
 def test_register_unregister_is_repeatable(clean_scene):
     import bpy
 
