@@ -5,6 +5,8 @@ Everything Gala does is available from a **Gala** tab in the 3D View sidebar
 calls exactly one Python API function, so nothing is available in the UI that
 is not scriptable, and vice versa.
 
+![The Gala sidebar tab](../images/ui/sidebar.png){ width="280" }
+
 ## Panels
 
 ### Scene Setup
@@ -22,10 +24,17 @@ Sub-panels:
 - **Passes and Compositing** — cryptomatte, the EXR output directory, depth of
   field, depth cue, and a *Render Still* button.
 
+![The Scene Setup panel, sub-panels open](../images/ui/scene-setup.png){ width="250" }
+
+The EXR directory shows red because its default, `//passes`, is relative to the
+.blend file — Blender marks relative paths in these fields. It is not an error.
+
 ### Interactions
 
 Two selection fields and a grid of interaction types. *Find Interactions*
 detects and draws them; the trash button clears them.
+
+![The Interactions panel](../images/ui/interactions.png){ width="250" }
 
 ### Measure
 
@@ -33,15 +42,27 @@ Select 2–4 atoms in Edit Mode and press *Measure*: Gala picks distance, angle
 or dihedral from how many you selected. Or type selection strings separated by
 `;` to do the same without leaving Object Mode.
 
+![The Measure panel](../images/ui/measure.png){ width="250" }
+
 ### Label
 
 Selection, template, level, style and size. The template accepts `{chain}`,
 `{resi}`, `{resn}`, `{one}`, `{name}`, `{elem}`, `{b}` and `{q}`.
 
+![The Label panel](../images/ui/label.png){ width="250" }
+
 ### Colour
 
 AlphaFold pLDDT, B-factor, or a CSV of per-residue values, with a colormap
-picker.
+picker. Choosing **CSV File** adds the column names to read it with.
+
+=== "pLDDT"
+
+    ![The Colour panel set to pLDDT](../images/ui/colour.png){ width="250" }
+
+=== "CSV file"
+
+    ![The Colour panel set to a CSV file](../images/ui/colour-csv.png){ width="250" }
 
 ### Clean Up
 

@@ -120,6 +120,10 @@ vignettes: check-blender ## Run every vignette and render its images
 	  $(BLENDER) --background --python "$$script" || exit 1; \
 	done
 
+.PHONY: ui-shots
+ui-shots: check-blender ## Recapture the sidebar screenshots in docs/images/ui
+	BLENDER="$(BLENDER)" python3 scripts/capture_ui.py
+
 # ---------------------------------------------------------------------------
 # Packaging
 # ---------------------------------------------------------------------------

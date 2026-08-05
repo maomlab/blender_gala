@@ -65,6 +65,25 @@ checks the output is unchanged.
     the rest of the session, so every later test fails on a missing biotite.
     The `clean_scene` fixture purges data-blocks by hand instead.
 
+## Documentation images
+
+The rendered figures in [Vignettes](vignettes.md) come from `make vignettes`.
+The panel screenshots in [The Blender UI](guide/ui.md) come from:
+
+```bash
+make ui-shots
+```
+
+That one needs a desktop session: a panel can only be photographed by drawing
+it, so `scripts/capture_ui.py` opens a Blender window per shot, screenshots it,
+and crops to the sidebar. Windows will appear and close while it runs. Neither
+target runs in CI, so re-run `make ui-shots` when you change a panel.
+
+Each shot is an entry in `SHOTS` in that script, naming the panels to expand;
+everything else about the session — factory settings, no region overlap, the
+default sidebar width a user actually sees — is fixed, so the images stay
+consistent with each other between runs.
+
 ## Style
 
 - `ruff` for linting and formatting, 88 columns.
