@@ -137,6 +137,11 @@ over the render, so it is never occluded and never changes size with the
 camera. Right for titles and captions; use `label()` for anything that must sit
 *in* the scene.
 
+This is the feature that sets the floor in
+[Requirements](../index.md#requirements): it goes through the annotation
+manager added in Molecular Nodes 4.5, so on anything older it raises and says
+which version it wants.
+
 ```python
 gala.clear_labels()
 ```

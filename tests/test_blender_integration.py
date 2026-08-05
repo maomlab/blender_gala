@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import numpy as np
 import pytest
 
@@ -353,6 +355,23 @@ def test_label_hud_registers_an_annotation(site_molecule):
     annotation = labels.label_hud(site_molecule, "Figure 1", size=32)
     assert annotation.text == "Figure 1"
     assert annotation.text_size == 32
+
+
+@requires_mn
+def test_label_hud_says_why_when_annotations_are_missing(site_molecule):
+    """Molecular Nodes older than 4.5 is out of support, not silently degraded.
+
+    Nothing stops someone pinning an old Molecular Nodes under a new Blender,
+    and the message they get should name the version that has what they want
+    rather than blame them for passing the wrong object.
+    """
+    from blender_gala.annotate import labels
+
+    with contextlib.suppress(AttributeError):
+        del site_molecule.annotations  # a build that predates the manager
+
+    with pytest.raises(TypeError, match=r"4\.5"):
+        labels.label_hud(site_molecule, "Figure 1")
 
 
 @requires_mn

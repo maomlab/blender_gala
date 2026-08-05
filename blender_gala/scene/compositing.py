@@ -6,9 +6,12 @@ without re-rendering a 40-minute image. Gala therefore enables the passes and
 writes them to a multilayer EXR rather than baking any of it into the beauty
 pass (SPECIFICATION D-14).
 
-Blender 5.x moved the scene compositor into a reusable node group
-(``scene.compositing_node_group``) while 4.x uses ``scene.node_tree``. Both are
-handled here so the same call works on either.
+Blender 5 moved the scene compositor into a reusable node group
+(``scene.compositing_node_group``), replaced several ``CompositorNode*`` types
+with the unified ``ShaderNode*`` ones, and swapped the File Output node's
+``base_path``/``layer_slots`` for ``directory``/``file_name`` and a
+``file_output_items`` collection. Only that generation is handled: the minimum
+supported Blender is 5.1.
 """
 
 from __future__ import annotations
@@ -44,11 +47,6 @@ def _require_bpy() -> Any:
     if bpy is None:  # pragma: no cover
         raise RuntimeError("this function must be called from inside Blender")
     return bpy
-
-
-def _is_blender_5() -> bool:
-    bpy_mod = _require_bpy()
-    return bpy_mod.app.version[0] >= 5
 
 
 # ---------------------------------------------------------------------------
@@ -150,39 +148,26 @@ def _compositor_tree(scene: Any, create: bool = True) -> Any:
     """Return the scene's compositor node tree, creating it if needed."""
     bpy_mod = _require_bpy()
 
-    if _is_blender_5():
-        tree = scene.compositing_node_group
-        if tree is None and create:
-            tree = bpy_mod.data.node_groups.new(
-                "GALA Compositing", "CompositorNodeTree"
-            )
-            tree.interface.new_socket(
-                "Image", in_out="INPUT", socket_type="NodeSocketColor"
-            )
-            tree.interface.new_socket(
-                "Image", in_out="OUTPUT", socket_type="NodeSocketColor"
-            )
-            tree.nodes.new("NodeGroupOutput")
-            scene.compositing_node_group = tree
-        return tree
-
-    if create:
-        scene.use_nodes = True
-    return scene.node_tree
+    tree = scene.compositing_node_group
+    if tree is None and create:
+        tree = bpy_mod.data.node_groups.new("GALA Compositing", "CompositorNodeTree")
+        tree.interface.new_socket(
+            "Image", in_out="INPUT", socket_type="NodeSocketColor"
+        )
+        tree.interface.new_socket(
+            "Image", in_out="OUTPUT", socket_type="NodeSocketColor"
+        )
+        tree.nodes.new("NodeGroupOutput")
+        scene.compositing_node_group = tree
+    return tree
 
 
 def _output_node(tree: Any) -> Any:
     """Return the node that terminates the compositor chain."""
-    if _is_blender_5():
-        for node in tree.nodes:
-            if node.bl_idname == "NodeGroupOutput":
-                return node
-        return tree.nodes.new("NodeGroupOutput")
-
     for node in tree.nodes:
-        if node.bl_idname == "CompositorNodeComposite":
+        if node.bl_idname == "NodeGroupOutput":
             return node
-    return tree.nodes.new("CompositorNodeComposite")
+    return tree.nodes.new("NodeGroupOutput")
 
 
 def _render_layers_node(tree: Any, scene: Any) -> Any:
@@ -210,45 +195,29 @@ def _remove_gala_nodes(tree: Any) -> int:
 
 def _new(
     tree: Any,
-    bl_idname: str | tuple[str, ...],
+    bl_idname: str,
     name: str,
     location: tuple[float, float],
 ) -> Any | None:
-    """Create a node, trying each candidate type in turn.
+    """Create a node, or warn and return ``None`` if this build has no such type.
 
-    Blender 5.0 rewrote the compositor and replaced several ``CompositorNode*``
-    types with the unified ``ShaderNode*`` ones, so most nodes need a candidate
-    list to work on both 4.2 LTS and 5.x.
-
-    Returns
-    -------
-    bpy.types.Node or None
-        ``None``, with a warning, if no candidate exists in this build.
+    Every type used here exists in 5.1 and 5.2, so the ``None`` is insurance
+    against a future release retiring one — the callers each skip their step
+    rather than raising in the middle of building a tree.
     """
-    candidates = (bl_idname,) if isinstance(bl_idname, str) else bl_idname
-    for candidate in candidates:
-        try:
-            node = tree.nodes.new(candidate)
-        except RuntimeError:
-            continue
-        node.name = f"{_GALA_PREFIX}{name}"
-        node.label = name
-        node.location = location
-        return node
+    try:
+        node = tree.nodes.new(bl_idname)
+    except RuntimeError:
+        warnings.warn(
+            f"this Blender build has no {bl_idname}; skipping the {name} step",
+            stacklevel=3,
+        )
+        return None
 
-    warnings.warn(
-        f"this Blender build has none of {candidates}; skipping the {name} step",
-        stacklevel=3,
-    )
-    return None
-
-
-def _output_named(node: Any, *names: str) -> Any | None:
-    for name in names:
-        socket = node.outputs.get(name)
-        if socket is not None:
-            return socket
-    return None
+    node.name = f"{_GALA_PREFIX}{name}"
+    node.label = name
+    node.location = location
+    return node
 
 
 def _typed_sockets(sockets: Any, socket_type: str) -> list[Any]:
@@ -261,10 +230,7 @@ def _typed_sockets(sockets: Any, socket_type: str) -> list[Any]:
 
 
 def _mix_sockets(node: Any) -> tuple[Any, Any, Any, Any]:
-    """Return ``(factor, a, b, result)`` for either mix node generation."""
-    if node.bl_idname == "CompositorNodeMixRGB":
-        colours = _typed_sockets(node.inputs, "RGBA")
-        return node.inputs["Fac"], colours[0], colours[1], node.outputs[0]
+    """Return ``(factor, a, b, result)`` of a ``ShaderNodeMix``."""
     factor = _typed_sockets(node.inputs, "VALUE")[0]
     colours = _typed_sockets(node.inputs, "RGBA")
     result = _typed_sockets(node.outputs, "RGBA")[0]
@@ -342,17 +308,17 @@ def setup_compositor(
     output.location = (900, 0)
 
     image = render_layers.outputs["Image"]
-    depth = _output_named(render_layers, "Depth", "Z")
+    depth = render_layers.outputs.get("Depth")
     x = -300
 
     if denoise:
         node = _new(tree, "CompositorNodeDenoise", "Denoise", (x, 0))
         if node is not None:
             tree.links.new(image, node.inputs["Image"])
-            normal = _output_named(render_layers, "Normal")
+            normal = render_layers.outputs.get("Normal")
             if normal is not None and "Normal" in node.inputs:
                 tree.links.new(normal, node.inputs["Normal"])
-            albedo = _output_named(render_layers, "DiffCol", "Diffuse Color")
+            albedo = render_layers.outputs.get("Diffuse Color")
             if albedo is not None and "Albedo" in node.inputs:
                 tree.links.new(albedo, node.inputs["Albedo"])
             image = node.outputs["Image"]
@@ -425,15 +391,8 @@ def _build_depth_cue(
         raise ValueError(f"depth_cue_range needs far > near, got {depth_range}")
 
     scale = units.DEFAULT_WORLD_SCALE
-    map_range = _new(
-        tree,
-        ("CompositorNodeMapRange", "ShaderNodeMapRange"),
-        "Depth Cue Range",
-        (x, -250),
-    )
-    mix = _new(
-        tree, ("CompositorNodeMixRGB", "ShaderNodeMix"), "Depth Cue", (x + 220, 0)
-    )
+    map_range = _new(tree, "ShaderNodeMapRange", "Depth Cue Range", (x, -250))
+    mix = _new(tree, "ShaderNodeMix", "Depth Cue", (x + 220, 0))
     if map_range is None or mix is None:
         return image
 
@@ -443,10 +402,9 @@ def _build_depth_cue(
     map_range.inputs["To Max"].default_value = 1.0
     map_range.clamp = True
     tree.links.new(depth, map_range.inputs["Value"])
-    factor_out = _output_named(map_range, "Result", "Value")
+    factor_out = map_range.outputs["Result"]
 
-    if getattr(mix, "bl_idname", "") == "ShaderNodeMix":
-        mix.data_type = "RGBA"
+    mix.data_type = "RGBA"
     mix.blend_type = "MIX"
 
     factor_in, colour_a, colour_b, result = _mix_sockets(mix)
@@ -514,15 +472,9 @@ def add_file_output(
     if node is None:
         return None
 
-    # Blender 5.x replaced base_path/layer_slots with directory/file_name and a
-    # file_output_items collection.
-    if hasattr(node, "file_output_items"):
-        node.directory = directory
-        node.file_name = basename
-        slots = _SlotAdapter(node.file_output_items, modern=True)
-    else:
-        node.base_path = os.path.join(directory, basename)
-        slots = _SlotAdapter(node.layer_slots, modern=False)
+    node.directory = directory
+    node.file_name = basename
+    slots = node.file_output_items
 
     from .render import set_image_format
 
@@ -533,43 +485,23 @@ def add_file_output(
     render_layers = _render_layers_node(tree, scene)
     slots.clear()
 
-    wanted = [
-        ("Image", ("Image",)),
-        ("Depth", ("Depth", "Z")),
-        ("Normal", ("Normal",)),
-    ]
+    wanted = ["Image", "Depth", "Normal"]
     wanted.extend(
-        (socket.name, (socket.name,))
+        socket.name
         for socket in render_layers.outputs
         if socket.name.startswith("Crypto")
     )
 
     linked = 0
-    for label, candidates in wanted:
-        socket = _output_named(render_layers, *candidates)
+    for label in wanted:
+        socket = render_layers.outputs.get(label)
         if socket is None:
             continue
-        slots.new(label)
+        slots.new("RGBA", label)
         tree.links.new(socket, node.inputs[linked])
         linked += 1
 
     return node
-
-
-class _SlotAdapter:
-    """Uniform ``new``/``clear`` over both File Output slot APIs."""
-
-    def __init__(self, collection: Any, modern: bool) -> None:
-        self._collection = collection
-        self._modern = modern
-
-    def clear(self) -> None:
-        self._collection.clear()
-
-    def new(self, name: str) -> Any:
-        if self._modern:
-            return self._collection.new("RGBA", name)
-        return self._collection.new(name)
 
 
 def set_exr_output(filepath: str, scene: Any = None) -> str:

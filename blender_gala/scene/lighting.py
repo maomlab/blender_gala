@@ -440,10 +440,7 @@ def hdri_lighting(
     tree.links.new(environment.outputs["Color"], background.inputs["Color"])
     tree.links.new(background.outputs["Background"], output.inputs["Surface"])
 
-    if hasattr(world, "cycles_visibility"):  # pragma: no cover - version dependent
-        world.cycles_visibility.camera = visible_to_camera
-    elif not visible_to_camera:
-        scene.render.film_transparent = True
+    world.cycles_visibility.camera = visible_to_camera
 
     world["gala_hdri"] = os.path.basename(path)
     return world

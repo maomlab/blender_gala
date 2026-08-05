@@ -11,7 +11,11 @@ website = "https://github.com/maomlab/blender_gala"
 
 tags = ["Render", "Scene", "Lighting", "Material"]
 
-blender_version_min = "4.2.0"
+# Molecular Nodes 4.5 is what Gala is written against, and it requires Blender
+# 5.1. Declaring the same floor here means Blender refuses to install Gala
+# where it could not work fully, rather than leaving it to fail a feature at a
+# time.
+blender_version_min = "5.1.0"
 
 license = ["SPDX:GPL-3.0-or-later"]
 copyright = ["2026 Blender Gala contributors"]
