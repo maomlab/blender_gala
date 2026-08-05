@@ -19,6 +19,9 @@ site/
 *.blend1
 *.blend2
 
+# The multilayer EXR passes vignette 5 writes next to the figures
+docs/images/passes/
+
 # Editors and OS
 .DS_Store
 *~

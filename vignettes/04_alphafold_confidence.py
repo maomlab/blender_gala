@@ -69,7 +69,14 @@ print(f"  {confident.sum()} of {len(confident)} atoms are confident or better")
 print(f"  very low (< 50): {gala.select(mol, 'b < 50').sum()} atoms")
 
 # Selections and colouring compose: style only the confident part.
-mol.add_style("ribbon", selection="b > 70")
+#
+# A style's `selection` names a boolean attribute on the mesh — Molecular Nodes
+# reads it inside geometry nodes, where Gala's parser is not running, so the
+# selection string has to be evaluated here and stored under a name. Passing
+# "b > 70" straight to add_style warns and draws nothing.
+attribute = mol.object.data.attributes.new("confident", "BOOLEAN", "POINT")
+attribute.data.foreach_set("value", confident.astype(bool).tolist())
+mol.add_style("ribbon", selection="confident")
 
 
 # ---------------------------------------------------------------------------

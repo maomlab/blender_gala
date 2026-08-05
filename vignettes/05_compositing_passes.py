@@ -93,12 +93,27 @@ print("  scale is very shallow. Check the result rather than trusting the number
 heading("5. Depth cueing")
 # ---------------------------------------------------------------------------
 # The classic way of keeping a crowded site readable: fade with depth.
-gala.depth_cue(near=0.0, far=40.0)  # angstrom from the camera
-print("  depth cue over 0-40 A")
+#
+# The range is measured in angstrom *from the camera*, so it has to bracket
+# where the molecule actually sits — a few hundred angstrom away at this
+# framing. A range that stops short of it fades the whole frame into the
+# background colour, which looks like a broken render rather than a cue.
+import numpy as np
+
+from blender_gala.core import units
+from blender_gala.core.entity import AtomStructure
+
+centre, radius = AtomStructure.from_any(mol).bounding_sphere()
+distance = float(np.linalg.norm(np.asarray(bpy.context.scene.camera.location) - centre))
+near = units.bu_to_angstrom(distance - radius)
+far = units.bu_to_angstrom(distance + radius)
+
+gala.depth_cue(near=near, far=far)
+print(f"  depth cue over {near:.0f}-{far:.0f} A from the camera")
 
 # That rebuilt the compositor, so re-attach the EXR output.
 gala.setup_compositor(
-    cryptomatte=True, depth_cue_range=(0.0, 40.0), file_output=exr_dir
+    cryptomatte=True, depth_cue_range=(near, far), file_output=exr_dir
 )
 
 

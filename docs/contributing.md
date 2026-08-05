@@ -79,6 +79,15 @@ it, so `scripts/capture_ui.py` opens a Blender window per shot, screenshots it,
 and crops to the sidebar. Windows will appear and close while it runs. Neither
 target runs in CI, so re-run `make ui-shots` when you change a panel.
 
+!!! warning "A vignette that fails has to say so out loud"
+
+    Blender prints the traceback from a `--python` script and then exits 0
+    anyway, so an exception is invisible to CI and to `make vignettes`.
+    `vignettes/_common.py` installs an `excepthook` that turns any unhandled
+    exception into a non-zero exit, and `render` rejects an image that is one
+    flat colour — a style selection naming an attribute that does not exist
+    draws nothing but only warns, which is how two figures shipped blank.
+
 Each shot is an entry in `SHOTS` in that script, naming the panels to expand;
 everything else about the session — factory settings, no region overlap, the
 default sidebar width a user actually sees — is fixed, so the images stay
