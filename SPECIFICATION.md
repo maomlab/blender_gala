@@ -264,16 +264,18 @@ object material slots for non-MN meshes.
 order: optional Denoise, optional depth-of-field via the Z pass (`Defocus`),
 exposure/contrast, and an alpha-preserving output. It is inserted between Render
 Layers and the output, and is idempotent — re-running rewires rather than
-duplicating. Blender 5.x (`scene.compositing_node_group`) and 4.x
-(`scene.node_tree`) are both handled.
+duplicating. It lives in `scene.compositing_node_group`, the Blender 5 form.
 
-**D-13a. Blender 5 renamed half the compositor.** Blender 5.0 rewrote the
-compositor: `CompositorNodeMapRange`, `CompositorNodeMixRGB` and
-`CompositorNodeMath` are gone in favour of the unified `ShaderNode*` types,
-and `CompositorNodeOutputFile` swapped `base_path`/`layer_slots` for
-`directory`/`file_name`/`file_output_items`. Node creation therefore takes a
-list of candidate `bl_idname`s, and CI runs the suite on the oldest supported
-Blender and the current one so neither path silently rots.
+**D-13a. Blender 5 renamed half the compositor, and only Blender 5 is
+supported.** Blender 5.0 rewrote the compositor: `CompositorNodeMapRange`,
+`CompositorNodeMixRGB` and `CompositorNodeMath` are gone in favour of the
+unified `ShaderNode*` types, `CompositorNodeOutputFile` swapped
+`base_path`/`layer_slots` for `directory`/`file_name`/`file_output_items`, and
+the Render Layers sockets became `Depth` and `Diffuse Color` rather than `Z`
+and `DiffCol`. Gala used to accept either generation. Since the minimum is
+Blender 5.1 (D-1) it targets the new names only — 5.1 and 5.2 were checked to
+be identical on every one of them — and CI runs the suite on both so a future
+rename cannot rot silently.
 
 **D-14. Cryptomatte is set up for *downstream* use, not baked in.** Gala adds a
 `CryptomatteV2` node per requested layer and a `File Output` node writing a

@@ -38,10 +38,10 @@ rebuilding, so calling this repeatedly rewires rather than accumulating
 duplicates. Nodes you added yourself are left alone.
 
 Blender 5 moved the scene compositor into a reusable node group and replaced
-several `CompositorNode*` types with unified `ShaderNode*` ones. Node creation
-still tries a list of candidate types, because those names continue to move
-between 5.x releases, and CI tests the oldest supported Blender and the
-current one for exactly that reason.
+several `CompositorNode*` types with unified `ShaderNode*` ones. Gala targets
+that generation only — the minimum supported Blender is 5.1 — and CI runs the
+suite on the oldest supported release and the current one, so a later rename
+shows up as a failure rather than a silently skipped step.
 
 ### Cryptomatte nodes are deliberately unconnected
 

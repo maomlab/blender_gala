@@ -251,19 +251,15 @@ def orbit(
 
 
 def _action_fcurves(action: Any) -> list[Any]:
-    """Return an action's F-curves on both the legacy and slotted APIs.
+    """Return an action's F-curves.
 
-    Blender 4.4 introduced slotted actions and Blender 5 removed
-    ``Action.fcurves`` outright, moving the curves into
-    ``layers > strips > channelbags``.
+    Blender 5 removed ``Action.fcurves``, moving the curves into
+    ``layers > strips > channelbags``, so they have to be gathered rather than
+    read off the action.
     """
-    legacy = getattr(action, "fcurves", None)
-    if legacy is not None:
-        return list(legacy)
-
     curves: list[Any] = []
-    for layer in getattr(action, "layers", ()):
-        for strip in getattr(layer, "strips", ()):
-            for channelbag in getattr(strip, "channelbags", ()):
+    for layer in action.layers:
+        for strip in layer.strips:
+            for channelbag in strip.channelbags:
                 curves.extend(channelbag.fcurves)
     return curves
