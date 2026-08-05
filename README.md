@@ -93,8 +93,10 @@ comparisons all work as you would expect.
 
 ## Installation
 
-**Requirements:** Blender 4.2 LTS or newer, and
-[Molecular Nodes](https://extensions.blender.org/add-ons/molecularnodes/).
+**Requirements:** Blender 5.1 or newer, and
+[Molecular Nodes](https://extensions.blender.org/add-ons/molecularnodes/) 4.5
+or newer. Gala is written against the Molecular Nodes 4.5 API, and 4.5 itself
+requires Blender 5.1; the extension manifest declares the same floor.
 
 1. Install Molecular Nodes from *Edit → Preferences → Get Extensions*.
 2. Download `blender_gala-<version>.zip` from the
@@ -193,8 +195,9 @@ biotite `AtomArray`, and are tested against synthetic structures built with
 exactly known geometry — a 2.80 Å hydrogen bond is 2.80 Å because it was placed
 there.
 
-CI runs the suite on Blender 4.2 LTS and 5.2 LTS, since Blender 5 rewrote the
-compositor and both paths need to keep working.
+CI runs the suite on Blender 5.1 — the oldest supported — and 5.2 LTS, since
+compositor node names have moved between releases and both paths need to keep
+working.
 
 ---
 

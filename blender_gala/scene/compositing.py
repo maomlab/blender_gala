@@ -217,8 +217,8 @@ def _new(
     """Create a node, trying each candidate type in turn.
 
     Blender 5.0 rewrote the compositor and replaced several ``CompositorNode*``
-    types with the unified ``ShaderNode*`` ones, so most nodes need a candidate
-    list to work on both 4.2 LTS and 5.x.
+    types with the unified ``ShaderNode*`` ones, and the names have kept moving
+    since, so most nodes need a candidate list to work across 5.x.
 
     Returns
     -------

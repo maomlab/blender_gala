@@ -44,10 +44,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The oldest supported release and the current one. Blender 5 rewrote
-        # the compositor, so both need to pass for the version shims to mean
-        # anything.
-        blender: ["4.2.11", "5.2.0"]
+        # The oldest supported release and the current one. 5.1 is the floor
+        # because Molecular Nodes 4.5 requires it, and Gala needs 4.5 for the
+        # whole feature set.
+        blender: ["5.1.2", "5.2.0"]
     steps:
       - uses: actions/checkout@v4
 
@@ -74,9 +74,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 libgl1 libsm6
 
-      # --online-mode is required: since 4.2 Blender refuses to reach the
-      # extensions repository without it, package_install fails its poll, and
-      # nothing is installed. Blender also exits 0 when a --python-expr raises,
+      # --online-mode is required: Blender refuses to reach the extensions
+      # repository without it, package_install fails its poll, and nothing is
+      # installed. Blender also exits 0 when a --python-expr raises,
       # so neither the `||` below nor the exit code can be trusted — the check
       # afterwards is what actually tells us whether it worked.
       - name: Install Molecular Nodes

@@ -2,9 +2,13 @@
 
 ## Install
 
-Blender Gala needs **Blender 4.2 LTS or newer**, and
-[Molecular Nodes](https://extensions.blender.org/add-ons/molecularnodes/) for
-anything that touches a molecule.
+Blender Gala needs **Blender 5.1 or newer** and
+**[Molecular Nodes](https://extensions.blender.org/add-ons/molecularnodes/) 4.5
+or newer** for anything that touches a molecule. Gala is written against the
+4.5 API, and 4.5 itself requires Blender 5.1 — so installing the current
+Molecular Nodes on a current Blender gives you a supported pair. The extension
+manifest declares 5.1 as its minimum, so an older Blender will decline to
+install Gala rather than run it half-working.
 
 1. *Edit → Preferences → Get Extensions*, search for **Molecular Nodes**,
    install it.

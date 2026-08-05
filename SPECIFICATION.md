@@ -30,7 +30,7 @@ throughout.
 
 | Item | Decision |
 | --- | --- |
-| Blender | 4.2 LTS minimum (extensions platform), developed and tested against 5.2 LTS |
+| Blender | 5.1 minimum — the floor for Molecular Nodes 4.5, which Gala is written against — developed and tested against 5.2 LTS |
 | Python | Blender's bundled interpreter (3.13 on Blender 5.2) |
 | Molecular Nodes | ≥ 4.5, optional at import time, required at run time for molecule-aware features |
 | Packaging | Blender **extension** (`blender_manifest.toml`), installable as a zip |
@@ -272,8 +272,8 @@ compositor: `CompositorNodeMapRange`, `CompositorNodeMixRGB` and
 `CompositorNodeMath` are gone in favour of the unified `ShaderNode*` types,
 and `CompositorNodeOutputFile` swapped `base_path`/`layer_slots` for
 `directory`/`file_name`/`file_output_items`. Node creation therefore takes a
-list of candidate `bl_idname`s, and CI runs the suite on both 4.2 LTS and
-5.2 LTS so neither path silently rots.
+list of candidate `bl_idname`s, and CI runs the suite on the oldest supported
+Blender and the current one so neither path silently rots.
 
 **D-14. Cryptomatte is set up for *downstream* use, not baked in.** Gala adds a
 `CryptomatteV2` node per requested layer and a `File Output` node writing a
@@ -416,7 +416,7 @@ a **Gala** tab: *Scene Setup*, *Materials & Lighting*, *Interactions*,
 | Scene reset | Tests purge data-blocks by hand. `bpy.ops.wm.read_factory_settings` disables every extension, and Blender then syncs the extension wheel directory to match — uninstalling Molecular Nodes' Python dependencies for the rest of the session, so every later test fails on a missing biotite. |
 | Lint/format | `ruff` (lint + format), line length 88. |
 | Types | `mypy` on `blender_gala/`, with `bpy`/`biotite`/`scipy` treated as untyped third-party. `fake-bpy-module` supplies `bpy` stubs in CI. |
-| CI | GitHub Actions: lint + typecheck job on system Python; test job downloading Blender 4.2 LTS and 5.2 LTS and running the headless suite on both. |
+| CI | GitHub Actions: lint + typecheck job on system Python; test job downloading Blender 5.1 and 5.2 LTS and running the headless suite on both. |
 | Build | `make build` produces `dist/blender_gala-<version>.zip` via `blender --command extension build`. |
 | Versioning | SemVer, single source of truth in `blender_manifest.toml`, read by `blender_gala.__version__`. |
 | Docs | MkDocs Material with `use_directory_urls: false`, so the built site is browsable straight off disk — clean URLs point at directories, which only a web server resolves. `scripts/check_links.py` fails the build on any internal link that does not resolve. API reference generated with `mkdocstrings`; vignettes are executable Python scripts that are *run* in CI and produce the images embedded in the docs. |

@@ -356,10 +356,10 @@ def label_hud(
     if isinstance(target, AtomStructure):
         molecule = target.molecule
     if molecule is not None and mn_bridge.is_molecule(molecule):
-        # A molecule, but from a build that predates annotations: the manager
-        # arrived in Molecular Nodes 4.5, which needs Blender 5.1. On Blender
-        # 4.2 the newest installable is 4.4, so this is the one feature the
-        # oldest supported Blender cannot have.
+        # A molecule, but from a build older than the 4.5 Gala requires: the
+        # annotation manager is what sets that floor. Nothing stops an old
+        # Molecular Nodes being pinned under a supported Blender, so say which
+        # version is wanted rather than fail obscurely.
         if not hasattr(molecule, "annotations"):
             installed = mn_bridge.version()
             named = (

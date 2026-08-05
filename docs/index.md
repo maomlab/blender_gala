@@ -62,13 +62,17 @@ wheels are bundled.
 
 | | |
 | --- | --- |
-| Blender | 4.2 LTS or newer |
-| Molecular Nodes | 4.4 or newer, for anything molecule-aware |
+| Blender | **5.1 or newer** |
+| Molecular Nodes | **4.5 or newer**, for anything molecule-aware |
 | Python dependencies | none bundled |
 
-Which Molecular Nodes you get is decided by which Blender you run: 4.5 needs
-Blender 5.1, so on Blender 4.2 the newest installable is 4.4. Everything works
-on both except [2D overlay labels](guide/measurement.md#2d-overlay-labels),
-which need the annotation manager added in 4.5.
+Those are minimums for the whole feature set, not a starting point to negotiate
+from: Gala is written against the Molecular Nodes 4.5 API, and Molecular Nodes
+4.5 requires Blender 5.1. The extension manifest declares the same floor, so
+Blender will not install Gala where it could not work fully.
+
+Older pairings are not partially supported. Blender 4.2 can only install
+Molecular Nodes 4.4, which has no annotation manager and so cannot draw 2D
+overlay labels at all.
 
 [mn]: https://bradyajohnston.github.io/MolecularNodes
