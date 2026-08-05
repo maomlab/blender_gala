@@ -7,7 +7,17 @@ the pure-geometry half of :mod:`geometry`) import ``bpy`` only optionally.
 
 from __future__ import annotations
 
-from . import chemistry, collections, entity, exceptions, geometry, mn, selection, units
+from . import (
+    chemistry,
+    collections,
+    entity,
+    exceptions,
+    geometry,
+    mn,
+    registration,
+    selection,
+    units,
+)
 from .entity import AtomStructure
 from .exceptions import (
     AmbiguousSelectionError,
@@ -37,6 +47,7 @@ __all__ = [
     "exceptions",
     "geometry",
     "mn",
+    "registration",
     "select",
     "select_indices",
     "selection",

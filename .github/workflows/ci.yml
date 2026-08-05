@@ -173,3 +173,9 @@ jobs:
 
       - name: Build
         run: mkdocs build --strict
+
+      # Clean URLs pointing at directories look fine under `mkdocs serve` and
+      # break the moment the site is opened from disk, so check the built
+      # output the way a reader sees it.
+      - name: Check internal links
+        run: python scripts/check_links.py

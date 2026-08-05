@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import bpy
 from bpy.types import Panel
 
 from ..core import mn as mn_bridge
+from ..core.registration import register_classes, unregister_classes
 
 __all__ = ["classes"]
 
@@ -259,11 +259,9 @@ classes = (
 
 def register() -> None:
     """Register every panel."""
-    for cls in classes:
-        bpy.utils.register_class(cls)
+    register_classes(classes)
 
 
 def unregister() -> None:
     """Unregister every panel."""
-    for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+    unregister_classes(classes)

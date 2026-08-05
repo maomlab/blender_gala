@@ -647,3 +647,39 @@ def test_orbit_keyframes_are_linear(clean_scene):
     for fcurve in curves:
         for keyframe in fcurve.keyframe_points:
             assert keyframe.interpolation == "LINEAR"
+
+
+def test_registration_survives_a_second_copy(clean_scene):
+    """A developer often has the extension installed *and* a checkout on the
+    path. Registering the second copy makes Blender unregister the first's
+    classes behind its back, and the first's unregister then used to raise
+    'missing bl_rna attribute ... (may not be registered)' at shutdown.
+    """
+    from blender_gala.core.registration import (
+        is_registered,
+        register_classes,
+        unregister_classes,
+    )
+    from blender_gala.ui import panels
+
+    register_classes(panels.classes)
+    assert all(is_registered(cls) for cls in panels.classes)
+
+    # Registering again must not leave duplicates or raise.
+    register_classes(panels.classes)
+    assert unregister_classes(panels.classes) == len(panels.classes)
+
+    # Unregistering what is already gone is a no-op rather than an error.
+    assert unregister_classes(panels.classes) == 0
+
+
+def test_register_unregister_is_repeatable(clean_scene):
+    import bpy
+
+    import blender_gala
+
+    for _ in range(3):
+        blender_gala.register()
+        assert hasattr(bpy.types.Scene, "gala")
+        blender_gala.unregister()
+        assert not hasattr(bpy.types.Scene, "gala")

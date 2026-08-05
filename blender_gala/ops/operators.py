@@ -20,6 +20,7 @@ from ..core import collections as gala_collections
 from ..core import mn as mn_bridge
 from ..core.entity import AtomStructure
 from ..core.exceptions import GalaError
+from ..core.registration import register_classes, unregister_classes
 from ..interactions import detect
 from ..interactions import draw as interaction_draw
 from ..measure import draw as measure_draw
@@ -559,11 +560,9 @@ classes = (
 
 def register() -> None:
     """Register every operator."""
-    for cls in classes:
-        bpy.utils.register_class(cls)
+    register_classes(classes)
 
 
 def unregister() -> None:
     """Unregister every operator."""
-    for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+    unregister_classes(classes)

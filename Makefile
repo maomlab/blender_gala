@@ -101,8 +101,13 @@ check: lint typecheck test ## Everything CI runs
 # ---------------------------------------------------------------------------
 
 .PHONY: docs
-docs: ## Build the documentation site into site/
+docs: ## Build the documentation site into site/ and verify its links
 	mkdocs build --strict
+	python3 scripts/check_links.py
+
+.PHONY: docs-links
+docs-links: ## Check that every internal link in site/ resolves
+	python3 scripts/check_links.py
 
 .PHONY: docs-serve
 docs-serve: ## Serve the documentation with live reload

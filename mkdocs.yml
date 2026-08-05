@@ -5,6 +5,13 @@ repo_url: https://github.com/blender-gala/blender_gala
 repo_name: blender-gala/blender_gala
 edit_uri: edit/main/docs/
 
+# Emit `guide/page.html` rather than `guide/page/index.html`. Clean URLs need a
+# server to resolve a directory to its index, so with the default the built
+# site is unusable when opened straight off disk with file:// — every internal
+# link lands on a folder listing. This costs a `.html` suffix on the published
+# URLs and makes `site/` browsable without a server.
+use_directory_urls: false
+
 theme:
   name: material
   features:

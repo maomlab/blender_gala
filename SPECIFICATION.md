@@ -48,6 +48,13 @@ soft dependency and degrades gracefully (see D-2).
 compositing) work without MN. Molecule-aware features raise a clear
 `MolecularNodesUnavailable` error naming the install steps.
 
+**D-2a. Registration is tolerant of a second copy.** Having the extension
+installed *and* a checkout on `sys.path` is the normal developer setup.
+Registering the second copy makes Blender unregister the first's classes behind
+its back, and the first's `unregister` then raises `missing bl_rna attribute`
+at shutdown. `core.registration` drops a stale registration before registering
+and never raises while tearing down, so the two copies coexist.
+
 **D-3. Dual importability.** Every intra-package import is relative, so the
 package works both as `bl_ext.user_default.blender_gala` (installed extension)
 and as a plain `blender_gala` on `sys.path` (tests, scripting).
@@ -412,7 +419,7 @@ a **Gala** tab: *Scene Setup*, *Materials & Lighting*, *Interactions*,
 | CI | GitHub Actions: lint + typecheck job on system Python; test job downloading Blender 4.2 LTS and 5.2 LTS and running the headless suite on both. |
 | Build | `make build` produces `dist/blender_gala-<version>.zip` via `blender --command extension build`. |
 | Versioning | SemVer, single source of truth in `blender_manifest.toml`, read by `blender_gala.__version__`. |
-| Docs | MkDocs Material; API reference generated with `mkdocstrings`; vignettes are executable Python scripts that are *run* in CI and produce the images embedded in the docs. |
+| Docs | MkDocs Material with `use_directory_urls: false`, so the built site is browsable straight off disk — clean URLs point at directories, which only a web server resolves. `scripts/check_links.py` fails the build on any internal link that does not resolve. API reference generated with `mkdocstrings`; vignettes are executable Python scripts that are *run* in CI and produce the images embedded in the docs. |
 
 **D-22. Vignettes are executable and rendered by CI.** A tutorial that has
 drifted from the code is worse than no tutorial. Each vignette in `vignettes/`

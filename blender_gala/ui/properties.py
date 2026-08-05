@@ -6,6 +6,8 @@ reload, and so several scenes in one file can be configured differently.
 
 from __future__ import annotations
 
+import contextlib
+
 import bpy
 from bpy.props import (
     BoolProperty,
@@ -17,6 +19,7 @@ from bpy.props import (
 from bpy.types import PropertyGroup
 
 from ..color import colormaps
+from ..core.registration import register_classes, unregister_classes
 from ..interactions.detect import INTERACTION_KINDS
 from ..scene import lighting, materials, presets
 
@@ -279,14 +282,14 @@ classes = (GalaSceneProperties,)
 
 def register() -> None:
     """Register the property group and attach it to Scene."""
-    for cls in classes:
-        bpy.utils.register_class(cls)
+    register_classes(classes)
     bpy.types.Scene.gala = bpy.props.PointerProperty(type=GalaSceneProperties)
 
 
 def unregister() -> None:
     """Detach and unregister the property group."""
     if hasattr(bpy.types.Scene, "gala"):
-        del bpy.types.Scene.gala
-    for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        # Another copy of the add-on may already have removed it.
+        with contextlib.suppress(AttributeError, RuntimeError):
+            del bpy.types.Scene.gala
+    unregister_classes(classes)

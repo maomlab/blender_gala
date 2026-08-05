@@ -160,12 +160,12 @@ gala.render("figure.png")
 
 ## Documentation
 
-- [Getting started](https://blender-gala.github.io/blender_gala/guide/getting-started/)
-- [Selection language reference](https://blender-gala.github.io/blender_gala/guide/selections/)
-- [Publication scenes](https://blender-gala.github.io/blender_gala/guide/scenes/)
-- [Interactions and measurement](https://blender-gala.github.io/blender_gala/guide/interactions/)
-- [Colouring by data](https://blender-gala.github.io/blender_gala/guide/colouring/)
-- [API reference](https://blender-gala.github.io/blender_gala/api/)
+- [Getting started](https://blender-gala.github.io/blender_gala/guide/getting-started.html)
+- [Selection language reference](https://blender-gala.github.io/blender_gala/guide/selections.html)
+- [Publication scenes](https://blender-gala.github.io/blender_gala/guide/scenes.html)
+- [Interactions and measurement](https://blender-gala.github.io/blender_gala/guide/interactions.html)
+- [Colouring by data](https://blender-gala.github.io/blender_gala/guide/colouring.html)
+- [API reference](https://blender-gala.github.io/blender_gala/api/index.html)
 
 Runnable end-to-end examples live in [`vignettes/`](vignettes/); CI executes
 every one of them, so they cannot drift from the code.
