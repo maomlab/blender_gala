@@ -18,13 +18,33 @@ DEPS_DIR  := .blender-deps
 # target and left the version blank.
 VERSION := $(shell sed -n 's/^version *= *"\(.*\)"/\1/p' $(PACKAGE)/blender_manifest.toml)
 
+VENV        := .venv
+VENV_PYTHON := $(VENV)/bin/python
+
 # The toolchain that runs outside Blender: ruff, mypy, mkdocs, and the helper
-# scripts. Needs 3.11 or newer, per `requires-python`. Override it when the
-# default `python3` is older or is a conda base you would rather not install
-# into:
+# scripts. `make venv` puts it in $(VENV), and once that exists every target
+# finds it without being told. Otherwise it is whatever `python3` is, which
+# still works if that interpreter has the toolchain. Override for a one-off:
 #
 #     make docs PYTHON=python3.13
-PYTHON ?= python3
+PYTHON ?= $(if $(wildcard $(VENV_PYTHON)),$(VENV_PYTHON),python3)
+
+# Commands that are run by name rather than as modules — ruff, mypy — should
+# come from the same place. Prepending is enough: with no venv this changes
+# nothing, and it does not disturb a contributor whose ruff is a standalone
+# binary rather than a Python package.
+ifneq ($(wildcard $(VENV)/bin),)
+  export PATH := $(abspath $(VENV)/bin):$(PATH)
+endif
+
+# The interpreter that *creates* the venv has to be 3.11 or newer, and the
+# default `python3` often is not. Prefer it when it qualifies, so the venv
+# matches the interpreter the rest of the machine uses.
+BASE_PYTHON ?= $(shell for p in python3 python3.13 python3.12 python3.11; do \
+	  command -v $$p >/dev/null 2>&1 \
+	    && $$p -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null \
+	    && { echo $$p; break; }; \
+	done)
 
 # Locate Blender: an explicit BLENDER wins, then PATH, then the usual
 # per-platform install locations.
@@ -67,12 +87,29 @@ check-python:
 	  echo "Point PYTHON at a newer one, e.g. PYTHON=python3.13"; exit 1; \
 	}
 
+# Homebrew and system Pythons are usually "externally managed" and refuse a
+# plain pip install, and a conda base is rarely where you want a project's
+# toolchain either. A venv sidesteps both, and needs no tooling beyond the
+# stdlib. Safe to re-run: that is how the toolchain gets updated.
+.PHONY: venv
+venv: ## Create .venv and install the toolchain into it (recommended)
+	@if [ -z "$(BASE_PYTHON)" ]; then \
+	  echo "No Python 3.11 or newer found on PATH."; \
+	  echo "Install one, or set BASE_PYTHON=/path/to/python3.13"; exit 1; \
+	fi
+	@echo "Creating $(VENV) with $(BASE_PYTHON) ($$($(BASE_PYTHON) -V 2>&1))"
+	$(BASE_PYTHON) -m venv $(VENV)
+	$(VENV_PYTHON) -m pip install --quiet --upgrade pip
+	$(VENV_PYTHON) -m pip install --upgrade -e ".[dev,docs]"
+	@echo
+	@echo "Done. make docs, lint, typecheck and ui-shots will now use $(VENV_PYTHON)."
+
 .PHONY: dev-deps
 dev-deps: check-blender ## Install pytest into .blender-deps for Blender's Python
 	$(BLENDER_RUN) --python scripts/install_deps.py
 
 .PHONY: dev
-dev: check-python ## Install the linting and docs toolchain into PYTHON
+dev: check-python ## Install the toolchain into PYTHON instead of a venv
 	$(PYTHON) -m pip install --upgrade -e ".[dev,docs]"
 
 # ---------------------------------------------------------------------------
@@ -188,5 +225,5 @@ clean: ## Remove build output and caches
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +
 
 .PHONY: clean-all
-clean-all: clean ## Also remove the Blender test dependencies
-	rm -rf $(DEPS_DIR)
+clean-all: clean ## Also remove the venv and the Blender test dependencies
+	rm -rf $(DEPS_DIR) $(VENV)
