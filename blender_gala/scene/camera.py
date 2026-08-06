@@ -183,6 +183,7 @@ def frame_target(
     target: Any = None,
     viewpoint: str | Sequence[float] = "iso",
     margin: float = 1.15,
+    selection: str | None = None,
     camera: Any = None,
     scene: Any = None,
 ) -> Any:
@@ -199,6 +200,10 @@ def frame_target(
         Extra room around the molecule, as a multiple of its projected extent.
         ``1.0`` puts the outermost atom exactly on the frame edge; the default
         leaves a little air so atoms do not touch it.
+    selection : str, optional
+        Frame only these atoms, which is how you close in on a binding site
+        without hiding the rest of the protein. Everything else stays in the
+        scene and is simply allowed out of frame.
     camera : bpy.types.Object, optional
         Camera to move. Defaults to the scene camera, created if absent.
     scene : bpy.types.Scene, optional
@@ -213,6 +218,8 @@ def frame_target(
     ------
     ValueError
         If ``viewpoint`` is neither a known name nor a pair of angles.
+    EmptySelectionError
+        If ``selection`` matches no atoms.
     """
     bpy_mod = _require_bpy()
     scene = scene or bpy_mod.context.scene
@@ -257,10 +264,14 @@ def frame_target(
         np.array(orientation @ Vector((0.0, 0.0, -1.0))),  # forward
     )
 
-    points = _subject_points(target, scene)
+    points = _subject_points(target, scene, selection)
     if points is None or len(points) == 0:
         distance = _fit_distance(radius, camera.data, scene, margin)
     else:
+        # Recomputed from the points actually being framed, which is not the
+        # whole molecule when a selection narrows it.
+        centre = points.mean(axis=0)
+        radius = max(float(np.linalg.norm(points - centre, axis=1).max()), 1e-4)
         centre, distance = _fit_to_points(
             points, centre, basis, camera.data, scene, margin
         )
@@ -286,13 +297,16 @@ def _target_bounds(target: Any, scene: Any) -> tuple[np.ndarray, float]:
     return _subject_bounds(target, scene)
 
 
-def _subject_points(target: Any, scene: Any) -> np.ndarray | None:
+def _subject_points(
+    target: Any, scene: Any, selection: str | None = None
+) -> np.ndarray | None:
     """World-space points to fit in the frame, or ``None`` if there are none.
 
     Atom positions when the target is a molecule, and bounding-box corners
     otherwise: a box is still a much closer fit than the sphere around it.
     """
     from ..core.entity import AtomStructure
+    from ..core.exceptions import EmptySelectionError
 
     if target is not None:
         try:
@@ -300,7 +314,18 @@ def _subject_points(target: Any, scene: Any) -> np.ndarray | None:
         except Exception:
             structure = None
         if structure is not None and structure.n_atoms and structure.object is not None:
-            return structure.world_positions()
+            positions = structure.world_positions()
+            if selection is None:
+                return positions
+            mask = structure.select(selection)
+            if not mask.any():
+                raise EmptySelectionError(
+                    f"cannot frame {selection!r}: it matches no atoms"
+                )
+            return positions[mask]
+
+    if selection is not None:
+        raise TypeError("framing a selection needs a molecule to select from")
 
     if bpy is None:
         return None

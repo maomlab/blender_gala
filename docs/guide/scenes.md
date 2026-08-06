@@ -212,8 +212,15 @@ centroid. The two coincide for a symmetrical molecule and separate for one with
 a long tail on one side — an AlphaFold model with disordered arms, say — where
 aiming at the centroid leaves a band of empty frame down the other side. One
 atom well away from the rest still costs you the whole frame either way,
-because it has to be in it: frame a selection instead if you would rather it
-were not.
+because it has to be in it. Frame a selection instead if you would rather it
+were not — which is also how you close in on a binding site:
+
+```python
+gala.frame_target(mol, selection="byres (protein within 4.5 of ligand)")
+```
+
+Everything outside the selection stays in the scene and is simply allowed out
+of shot.
 
 A turntable:
 

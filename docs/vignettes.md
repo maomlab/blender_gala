@@ -32,8 +32,10 @@ report it returns.
 ![02_binding_site](images/02_binding_site.png)
 
 `02_binding_site.py` — find every interaction between a ligand and its pocket,
-draw them as dashed lines with distance labels, and label the pocket residues
-on translucent cards. The full Objective 2 workflow.
+draw them as dashed lines, quote the polar distances, and label the closest
+residues on translucent cards. The camera looks in along the direction the
+pocket opens, computed from the structure, and frames the site rather than the
+protein. The full Objective 2 workflow.
 
 ## 3. Measuring
 

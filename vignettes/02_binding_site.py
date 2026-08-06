@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import numpy as np
 from _common import QUALITY, heading, load_structure, render, setup
 
 mn, gala = setup()
@@ -86,8 +87,19 @@ for contact in sorted(contacts, key=lambda c: c.distance)[:6]:
 heading("4. Draw them")
 # ---------------------------------------------------------------------------
 # Real curve objects, not overlays: they light, shadow and occlude correctly.
+#
+# Distances are quoted for the polar contacts only. It is what a figure legend
+# would report, and twenty numbers stacked over one binding site is not a
+# figure anybody can read.
+POLAR_KINDS = {"hbond", "polar", "salt_bridge"}
+
 drawn = gala.draw_interactions(
-    contacts,
+    [c for c in contacts if c.kind not in POLAR_KINDS],
+    target=mol,
+    label=False,
+)
+drawn += gala.draw_interactions(
+    [c for c in contacts if c.kind in POLAR_KINDS],
     target=mol,
     label=True,
     label_template="{distance:.1f}",
@@ -113,15 +125,20 @@ gala.draw_interactions(
 # ---------------------------------------------------------------------------
 heading("5. Label the pocket")
 # ---------------------------------------------------------------------------
+# Only the residues in closest contact, and sized for the close-up below
+# rather than for the whole protein. Naming all sixteen pocket residues at this
+# range stacks the cards on top of each other and on the site they describe.
+CLOSEST = f"byres (protein within 3.6 of ({LIGAND}))"
+
 labels = gala.label(
     mol,
-    POCKET,
+    CLOSEST,
     template="{one}{resi}",
     level="residue",
     anchor="ca",
     style="card",  # a translucent plane keeps text legible over the surface
-    size=2.0,
-    offset=3.0,
+    size=0.9,
+    offset=2.0,
     billboard=True,
 )
 print(f"  labelled {len([o for o in labels if o.type == 'FONT'])} residues")
@@ -133,9 +150,31 @@ gala.label_hud(mol, "Ligand binding site", location=(0.04, 0.95), size=28)
 # ---------------------------------------------------------------------------
 heading("6. Frame the site rather than the whole protein")
 # ---------------------------------------------------------------------------
-# The margin only has to clear the labels and dashes drawn around the
-# molecule; the framing itself is now tight to the atoms.
-gala.frame_target(mol, viewpoint="iso", margin=1.15)
+# Frame the pocket, not the protein: the rest stays in the scene and is simply
+# allowed out of shot. Framing `mol` here — which this used to do, despite the
+# heading — put the whole 917-atom protein in the frame and left the site a
+# knot in the middle of it.
+SITE = f"({POCKET}) or ({LIGAND})"
+
+# Look into the pocket rather than from a fixed compass point. The direction
+# out of the protein through the ligand is where the site opens, so that is
+# where the camera belongs — derived from this structure rather than
+# hand-tuned, so it still points at the site for a different complex.
+import math
+
+positions = structure.world_positions()
+outward = positions[structure.select(LIGAND)].mean(axis=0) - positions[
+    structure.select("protein")
+].mean(axis=0)
+outward /= np.linalg.norm(outward)
+viewpoint = (
+    math.degrees(math.atan2(outward[0], -outward[1])),
+    math.degrees(math.asin(float(np.clip(outward[2], -1.0, 1.0)))),
+)
+print(f"  looking in along ({viewpoint[0]:.0f} deg, {viewpoint[1]:.0f} deg)")
+
+# The margin has to clear the labels, which sit outside the atoms they name.
+gala.frame_target(mol, selection=SITE, viewpoint=viewpoint, margin=1.7)
 gala.depth_of_field(mol, fstop=4.0)
 
 
