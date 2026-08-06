@@ -2,6 +2,10 @@
 
 **Structural biology visualization tools for Blender.**
 
+![The Gala sidebar open in Blender, with arrows to the figures it produces:
+publication scenes, interactions, measurements, colouring by data, compositing
+passes and animation](images/hero.png)
+
 [Molecular Nodes][mn] brought molecules into Blender and gave them Blender's
 rendering. Blender Gala adds the day-to-day work that sits either side of that:
 getting from a freshly imported structure to a publication-ready image, and

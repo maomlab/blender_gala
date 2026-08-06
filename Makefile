@@ -206,6 +206,18 @@ turntable: check-blender ## Render the turntable animation into docs/images
 ui-shots: check-blender ## Recapture the sidebar screenshots in docs/images/ui
 	BLENDER="$(BLENDER)" $(PYTHON) scripts/capture_ui.py
 
+# Opens a Blender window, like `ui-shots`, and for the same reason: a
+# screenshot is a picture of the framebuffer, which `--background` never fills.
+.PHONY: window-shot
+window-shot: check-blender ## Recapture the whole-window shot the hero is built from
+	BLENDER="$(BLENDER)" $(PYTHON) scripts/capture_window.py
+
+# Composes what `window-shot` and `vignettes` produced; renders nothing itself,
+# so it is cheap to rerun after editing the captions.
+.PHONY: hero
+hero: ## Compose the front page hero into docs/images/hero.png
+	$(PYTHON) scripts/make_hero.py
+
 # ---------------------------------------------------------------------------
 # Packaging
 # ---------------------------------------------------------------------------
