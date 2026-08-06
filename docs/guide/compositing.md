@@ -81,6 +81,19 @@ gala.depth_of_field(mol, fstop=2.8)
 Focusing on an object rather than a distance means the focus follows it through
 an animation.
 
+The focus lands on the target's *origin*, which for a molecule whose origin has
+been moved to its centroid is the middle of the whole protein. At these
+apertures that is several ångström off whatever you meant to look at, so name
+it:
+
+```python
+gala.depth_of_field(mol, selection="ligand", fstop=4.0)
+```
+
+That parks a `GALA Focus` empty on the middle of the selection and focuses on
+that, so the focus still tracks — and `clear_all` removes it with everything
+else Gala made.
+
 !!! note "F-stops at molecular scale"
 
     One ångström is 0.01 Blender units, so the depth of field is very shallow.

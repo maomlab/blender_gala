@@ -558,9 +558,39 @@ def clear_compositor(scene: Any = None) -> int:
 # ---------------------------------------------------------------------------
 
 
+#: An empty parked on whatever the camera should focus on. An object rather
+#: than a distance so the focus keeps up with an orbit or an animation.
+_FOCUS_NAME = "GALA Focus"
+
+
+def _focus_empty(target: Any, selection: str, scene: Any) -> Any:
+    """Return an empty at the middle of ``selection``, creating it if needed."""
+    bpy_mod = _require_bpy()
+
+    from ..core import collections as gala_collections
+    from ..core.exceptions import EmptySelectionError
+
+    structure = AtomStructure.from_any(target)
+    mask = structure.select(selection)
+    if not mask.any():
+        raise EmptySelectionError(f"cannot focus on {selection!r}: it matches no atoms")
+    point = structure.world_positions()[mask].mean(axis=0)
+
+    obj = bpy_mod.data.objects.get(_FOCUS_NAME)
+    if obj is None:
+        obj = bpy_mod.data.objects.new(_FOCUS_NAME, None)
+        obj.empty_display_type = "SPHERE"
+        obj.empty_display_size = 0.02
+        gala_collections.link_object(obj, gala_collections.ROOT, scene)
+        gala_collections.tag(obj, "focus")
+    obj.location = tuple(float(value) for value in point)
+    return obj
+
+
 def depth_of_field(
     target: Any = None,
     fstop: float = 2.8,
+    selection: str | None = None,
     focus_distance: float | None = None,
     enable: bool = True,
     camera: Any = None,
@@ -582,6 +612,12 @@ def depth_of_field(
         Aperture. Lower is a shallower depth of field. At molecular scale
         (1 Å = 0.01 units) the depth of field is very shallow, so values around
         2.8-8 are usually a starting point rather than a final answer.
+    selection : str, optional
+        Focus on the middle of these atoms rather than on the target's origin.
+        Without it the focus lands on the object origin, which for a molecule
+        whose origin has been moved to its centroid is the middle of the whole
+        protein — so a ligand a few ångström in front of that is exactly what
+        the shallow depth of field blurs.
     focus_distance : float, optional
         Explicit focus distance in Blender units. Ignored when ``target`` is an
         object.
@@ -619,7 +655,9 @@ def depth_of_field(
 
     focus_object = None
     if target is not None:
-        if bpy is not None and isinstance(target, bpy.types.Object):
+        if selection is not None:
+            focus_object = _focus_empty(target, selection, scene)
+        elif bpy is not None and isinstance(target, bpy.types.Object):
             focus_object = target
         else:
             structure = AtomStructure.from_any(target)

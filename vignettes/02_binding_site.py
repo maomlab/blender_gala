@@ -175,7 +175,10 @@ print(f"  looking in along ({viewpoint[0]:.0f} deg, {viewpoint[1]:.0f} deg)")
 
 # The margin has to clear the labels, which sit outside the atoms they name.
 gala.frame_target(mol, selection=SITE, viewpoint=viewpoint, margin=1.7)
-gala.depth_of_field(mol, fstop=4.0)
+# Focus on the ligand, not on the molecule's origin: that sits at the protein
+# centroid, several angstrom behind the site, and at this aperture that is the
+# difference between a sharp ligand and a blurred one.
+gala.depth_of_field(mol, selection=LIGAND, fstop=4.0)
 
 
 # ---------------------------------------------------------------------------

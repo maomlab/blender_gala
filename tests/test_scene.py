@@ -625,6 +625,32 @@ def test_depth_of_field_configures_the_camera(clean_scene):
     assert not data.dof.use_dof
 
 
+@requires_mn
+def test_depth_of_field_focuses_on_a_selection(site_molecule):
+    """Focusing on the target focuses on its origin, which is not the ligand.
+
+    For a molecule whose origin has been moved to its centroid, that is the
+    middle of the protein — and at these apertures the few angstrom between
+    there and the ligand is the difference between sharp and blurred.
+    """
+    from blender_gala.core.entity import AtomStructure
+    from blender_gala.scene import camera, compositing
+
+    camera.ensure_camera()
+    structure = AtomStructure.from_any(site_molecule)
+    ligand = structure.world_positions()[structure.select("resn LIG")].mean(axis=0)
+
+    data = compositing.depth_of_field(site_molecule, selection="resn LIG")
+    focus = data.dof.focus_object
+
+    assert focus is not None
+    assert np.allclose(np.array(focus.location), ligand, atol=1e-6)
+    assert focus.get("gala_type") == "focus", "must be cleared with the rest"
+
+    with pytest.raises(Exception, match="matches no atoms"):
+        compositing.depth_of_field(site_molecule, selection="resn ZZZ")
+
+
 # ---------------------------------------------------------------------------
 # The whole thing
 # ---------------------------------------------------------------------------
