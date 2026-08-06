@@ -53,22 +53,11 @@ mol.add_style("ball_and_stick", selection="is_hetero")
 # brightness do that work by themselves; Molecular Nodes' default gives protein
 # and ligand the same pink and leaves them competing.
 #
-# Ordered general to specific, because later entries win where selections
-# overlap: everything cool, then the ligand's carbons warm, then its
-# heteroatoms back to the CPK colours a chemist reads without a legend.
+# The colours go on in step 4, once the contacts say which residues are worth
+# drawing atom by atom.
 SLATE = "#93a6b8"
 AMBER = "#ffaf3a"
-
-gala.color_by_selection(
-    mol,
-    {
-        "all": SLATE,
-        f"({LIGAND}) and elem C": AMBER,
-        f"({LIGAND}) and elem N": "#3050f8",
-        f"({LIGAND}) and elem O": "#ff2010",
-        f"({LIGAND}) and elem S": "#ffd030",
-    },
-)
+NITROGEN, OXYGEN, SULFUR = "#3050f8", "#ff2010", "#ffd030"
 
 gala.publication_setup(
     mol,
@@ -142,7 +131,9 @@ for contact in contacts:
 
 residue_keys = structure.context.residue_key
 contact_residues = np.unique(residue_keys[contact_atoms])
-contact_atoms = np.isin(residue_keys, contact_residues)
+# Whole residues, and only the receptor's: a ring-based contact carries every
+# ring atom, the ligand's included, and the ligand already has its own style.
+contact_atoms = np.isin(residue_keys, contact_residues) & structure.select("protein")
 
 attribute = mol.object.data.attributes.new("contacts", "BOOLEAN", "POINT")
 attribute.data.foreach_set("value", contact_atoms.tolist())
@@ -152,7 +143,31 @@ mol.add_style(
     color=None,
 )
 gala.assign_materials(mol, scheme="chemistry")
-print(f"  {len(contact_residues)} contacting residues drawn as thin sticks")
+print(f"  {len(contact_atoms.nonzero()[0])} atoms drawn as thin sticks")
+
+# Now the colours, ordered general to specific because later entries win where
+# selections overlap. The contacting residues are drawn atom by atom, so they
+# are coloured atom by atom: CPK for the heteroatoms, which is what the polar
+# contacts land on and what a chemist reads without a legend. Their carbons
+# stay slate, so the warm/cool split still says which molecule is the subject.
+res_ids = sorted(
+    {int(value) for value in structure.context.annotation("res_id")[contact_atoms]}
+)
+CONTACTS = "byres (protein and resi " + "+".join(str(value) for value in res_ids) + ")"
+
+gala.color_by_selection(
+    mol,
+    {
+        "all": SLATE,
+        f"({CONTACTS}) and elem N": NITROGEN,
+        f"({CONTACTS}) and elem O": OXYGEN,
+        f"({CONTACTS}) and elem S": SULFUR,
+        f"({LIGAND}) and elem C": AMBER,
+        f"({LIGAND}) and elem N": NITROGEN,
+        f"({LIGAND}) and elem O": OXYGEN,
+        f"({LIGAND}) and elem S": SULFUR,
+    },
+)
 
 # Restyle one kind. Distances are in angstrom throughout.
 from blender_gala import InteractionStyle

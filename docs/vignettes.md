@@ -35,8 +35,8 @@ report it returns.
 draw them as dashed lines, quote the polar distances, and label the closest
 residues on translucent cards. A cool neutral protein against warm ligand
 carbons, so the eye goes where the figure is about, and the contacting residues
-as ball-and-stick at half the ligand's radii, so the dashes land on atoms
-without competing with it. The camera looks in along the direction the
+as ball-and-stick at half the ligand's radii and coloured by element, so the
+dashes land on atoms you can identify without competing with the ligand. The camera looks in along the direction the
 pocket opens, computed from the structure, and frames the site rather than the
 protein. The full Objective 2 workflow.
 
