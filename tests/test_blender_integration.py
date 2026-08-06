@@ -134,8 +134,46 @@ def test_billboard_adds_one_constraint(clean_scene):
 
     geometry.billboard(obj)
     geometry.billboard(obj)
-    assert len([c for c in obj.constraints if c.type == "TRACK_TO"]) == 1
+    assert len([c for c in obj.constraints if c.type == "COPY_ROTATION"]) == 1
     assert obj.constraints[0].target is bpy.context.scene.camera
+    assert not [c for c in obj.constraints if c.type == "TRACK_TO"]
+
+
+def test_billboards_are_square_to_the_camera(clean_scene):
+    """Facing the camera is not enough; they have to be level with it too.
+
+    Tracking aims each label at the camera and rolls it towards world +Y, so
+    labels in different places end up tipped by different amounts — visibly
+    crooked, and never level unless the camera is upright.
+    """
+    import math
+
+    import bpy
+    from mathutils import Vector
+
+    from blender_gala.core import geometry
+    from blender_gala.scene import camera
+
+    scene_camera = camera.ensure_camera(clean_scene)
+    scene_camera.rotation_euler = (math.radians(63), 0.0, math.radians(41))
+
+    labels = [
+        geometry.billboard(geometry.make_text(f"label{index}", "X", location))
+        for index, location in enumerate([(3, 0, 0), (-2, 4, 1), (0, -3, 5)])
+    ]
+
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    camera_up = np.array(scene_camera.matrix_world.to_3x3() @ Vector((0.0, 1.0, 0.0)))
+
+    ups = []
+    for obj in labels:
+        rotation = obj.evaluated_get(depsgraph).matrix_world.to_3x3()
+        ups.append(np.array(rotation @ Vector((0.0, 1.0, 0.0))))
+        assert np.allclose(ups[-1], camera_up, atol=1e-5), "label is not level"
+
+    for other in ups[1:]:
+        assert np.allclose(other, ups[0], atol=1e-5), "labels are not parallel"
 
 
 def test_billboard_without_a_camera_is_a_no_op(clean_scene):

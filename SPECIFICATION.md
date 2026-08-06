@@ -303,7 +303,9 @@ scene object.
 
 **D-16. Text labels get both treatments.** `label_3d()` creates a real `FONT`
 object ("in-scene card", optionally with a rounded backing plane and a
-`TRACK_TO` billboard constraint). `label_hud()` registers an MN annotation so
+`COPY_ROTATION` billboard constraint — not `TRACK_TO`, which aims each label at
+the camera and then rolls it towards world +Y, so labels in different places
+come out tipped by different amounts). `label_hud()` registers an MN annotation so
 the label is a resolution-independent 2D overlay for compositing. The objective
 asked for both; they solve different problems.
 

@@ -437,10 +437,19 @@ def make_text(
 
 
 def billboard(obj: Any, camera: Any = None) -> Any:
-    """Make ``obj`` always face the camera.
+    """Make ``obj`` always face the camera, squarely.
 
-    Uses a ``TRACK_TO`` constraint rather than baking a rotation, so the label
-    keeps facing the camera through an orbit animation.
+    Copies the camera's rotation rather than baking one in, so the label keeps
+    facing the camera through an orbit animation.
+
+    ``COPY_ROTATION`` rather than ``TRACK_TO``, which is the obvious choice and
+    is wrong: tracking aims each label's +Z at the camera and then rolls it to
+    put its +Y as near *world* +Y as it can. Every label is in a different
+    place, so every label aims along a slightly different line and takes a
+    different roll — a page of text each tipped a few degrees from the next,
+    and none of them level with the frame unless the camera happens to be
+    upright. Copying the rotation gives every label the camera's own axes, so
+    they are square to the frame and parallel to each other.
 
     Parameters
     ----------
@@ -459,12 +468,12 @@ def billboard(obj: Any, camera: Any = None) -> Any:
     if camera is None:
         return obj
 
+    # TRACK_TO as well as COPY_ROTATION: a scene built by an earlier version
+    # carries the tracking constraint, and the two would fight.
     for existing in list(obj.constraints):
-        if existing.type == "TRACK_TO":
+        if existing.type in {"TRACK_TO", "COPY_ROTATION"}:
             obj.constraints.remove(existing)
 
-    constraint = obj.constraints.new("TRACK_TO")
+    constraint = obj.constraints.new("COPY_ROTATION")
     constraint.target = camera
-    constraint.track_axis = "TRACK_Z"
-    constraint.up_axis = "UP_Y"
     return obj

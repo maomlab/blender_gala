@@ -111,7 +111,7 @@ gala.label(
     style="card",              # a translucent backing plane
     size=2.0,                  # angstrom
     offset=2.5,                # lifted above the anchor
-    billboard=True,            # keeps facing the camera through an orbit
+    billboard=True,            # faces the camera, square to the frame
 )
 ```
 
@@ -125,6 +125,11 @@ gala.label_atoms(mol, "resn ZN", template="{elem}")
 `style="card"` puts the text on a translucent plane, which is what keeps a
 label legible over a busy molecular surface. The card is parented to the text
 and billboards with it.
+
+Billboarding copies the camera's rotation rather than tracking it, so every
+label is level with the frame and parallel to every other. Tracking would aim
+each label at the camera and then roll it towards world +Y, which tips labels
+in different places by different amounts.
 
 ### 2D overlay labels
 
