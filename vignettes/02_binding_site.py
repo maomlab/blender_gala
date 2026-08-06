@@ -186,32 +186,7 @@ gala.draw_interactions(
 
 
 # ---------------------------------------------------------------------------
-heading("5. Label the pocket")
-# ---------------------------------------------------------------------------
-# Only the residues in closest contact, and sized for the close-up below
-# rather than for the whole protein. Naming all sixteen pocket residues at this
-# range stacks the cards on top of each other and on the site they describe.
-CLOSEST = f"byres (protein within 3.4 of ({LIGAND}))"
-
-labels = gala.label(
-    mol,
-    CLOSEST,
-    template="{one}{resi}",
-    level="residue",
-    anchor="ca",
-    style="card",  # a translucent plane keeps text legible over the surface
-    size=0.9,
-    offset=2.0,
-    billboard=True,
-)
-print(f"  labelled {len([o for o in labels if o.type == 'FONT'])} residues")
-
-# A caption that can never be occluded, drawn in screen space.
-gala.label_hud(mol, "Ligand binding site", location=(0.04, 0.95), size=28)
-
-
-# ---------------------------------------------------------------------------
-heading("6. Frame the site rather than the whole protein")
+heading("5. Frame the site rather than the whole protein")
 # ---------------------------------------------------------------------------
 # Frame the pocket, not the protein: the rest stays in the scene and is simply
 # allowed out of shot. Framing `mol` here — which this used to do, despite the
@@ -245,6 +220,35 @@ gala.frame_target(mol, selection=LIGAND, viewpoint=viewpoint, margin=2.6)
 # centroid, several angstrom behind the site, and at this aperture that is the
 # difference between a sharp ligand and a blurred one.
 gala.depth_of_field(mol, selection=LIGAND, fstop=11.0)
+
+
+# ---------------------------------------------------------------------------
+heading("6. Label the pocket")
+# ---------------------------------------------------------------------------
+# After the framing, not before it: a label is moved towards the camera
+# until nothing is in front of it, so it has to know where the camera
+# finally ended up.
+#
+# Only the residues in closest contact, and sized for the close-up
+# rather than for the whole protein. Naming all sixteen pocket residues at this
+# range stacks the cards on top of each other and on the site they describe.
+CLOSEST = f"byres (protein within 3.4 of ({LIGAND}))"
+
+labels = gala.label(
+    mol,
+    CLOSEST,
+    template="{one}{resi}",
+    level="residue",
+    anchor="ca",
+    style="card",  # a translucent plane keeps text legible over the surface
+    size=0.9,
+    offset=2.0,
+    billboard=True,
+)
+print(f"  labelled {len([o for o in labels if o.type == 'FONT'])} residues")
+
+# A caption that can never be occluded, drawn in screen space.
+gala.label_hud(mol, "Ligand binding site", location=(0.04, 0.95), size=28)
 
 
 # ---------------------------------------------------------------------------

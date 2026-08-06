@@ -350,6 +350,64 @@ def test_label_one_per_residue(site_molecule):
 
 
 @requires_mn
+def test_labels_move_in_front_of_what_hides_them(site_molecule):
+    """A label on a buried atom is behind the protein from almost every angle.
+
+    Which direction clears it depends on where the camera is, so a fixed
+    offset cannot do it — the ribbon that hides a pocket residue is in a
+    different place for every viewpoint.
+    """
+    import bpy
+
+    from blender_gala.annotate import labels
+    from blender_gala.core.entity import AtomStructure
+    from blender_gala.scene import camera as gala_camera
+
+    structure = AtomStructure.from_any(site_molecule)
+    obj = gala_camera.frame_target(structure, viewpoint="front")
+    origin = np.array(obj.matrix_world.translation)
+    centre, _ = structure.bounding_sphere()
+
+    # A wall across the view, halfway to the molecule.
+    towards = centre - origin
+    midpoint = origin + towards * 0.5
+    forward = towards / np.linalg.norm(towards)
+    right = np.cross(forward, (0.0, 0.0, 1.0))
+    right /= np.linalg.norm(right)
+    up = np.cross(right, forward)
+    mesh = bpy.data.meshes.new("wall")
+    mesh.from_pydata(
+        [
+            (midpoint + right * sx + up * sy).tolist()
+            for sx, sy in ((-9, -9), (9, -9), (9, 9), (-9, 9))
+        ],
+        [],
+        [(0, 1, 2, 3)],
+    )
+    mesh.update()
+    wall = bpy.data.objects.new("wall", mesh)
+    bpy.context.scene.collection.objects.link(wall)
+    bpy.context.view_layer.update()
+
+    wall_distance = float(np.linalg.norm(midpoint - origin))
+
+    (hidden,) = labels.label(
+        site_molecule, "resi 1", level="selection", avoid_occlusion=False
+    )
+    assert np.linalg.norm(np.array(hidden.location) - origin) > wall_distance, (
+        "the label should start out behind the wall"
+    )
+
+    (lifted,) = labels.label(site_molecule, "resi 1", level="selection")
+    assert np.linalg.norm(np.array(lifted.location) - origin) < wall_distance, (
+        "the label should have moved in front of the wall"
+    )
+    assert lifted.data.size < hidden.data.size, (
+        "and been scaled down, so moving it closer does not enlarge it"
+    )
+
+
+@requires_mn
 def test_label_one_per_atom(site_molecule):
     from blender_gala.annotate import labels
 

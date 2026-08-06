@@ -126,6 +126,14 @@ gala.label_atoms(mol, "resn ZN", template="{elem}")
 label legible over a busy molecular surface. The card is parented to the text
 and billboards with it.
 
+Labels are moved towards the camera until nothing is in front of them, and
+scaled down by as much as they moved so that the shift does not enlarge them.
+A label anchored on a residue inside a protein is otherwise behind that
+protein from almost every angle, and no fixed offset fixes it: the direction
+that clears the ribbon depends on where the camera is. Which is also why
+labelling comes *after* framing — pass `avoid_occlusion=False` for an orbit,
+where no one position is in front for every frame.
+
 Distances and measured values get a translucent pill behind them for the same
 reason, in a cooler tint and a different outline from the residue cards, so the
 two kinds of label are distinguishable at a glance. Pass `label_card=False` to
