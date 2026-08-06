@@ -289,6 +289,31 @@ def test_distance_draws_a_line_and_a_label(site_molecule):
 
 
 @requires_mn
+def test_a_measurement_label_takes_an_offset_in_every_axis(site_molecule):
+    """Two measurements in one figure need their values moved apart on screen,
+    which a lift along +Z alone cannot do."""
+    from blender_gala.core.entity import AtomStructure
+    from blender_gala.measure import draw, measurements
+
+    draw.clear_measurements()
+    measurement = measurements.distance(
+        site_molecule, "resi 1 and name OG", "resi 2 and name OD1"
+    )
+    scale = AtomStructure.from_any(site_molecule).world_scale
+    created = draw.draw_measurement(
+        measurement,
+        target=site_molecule,
+        label_offset=(3.0, 0.0, 0.0),
+        label_avoid_occlusion=False,
+    )
+
+    label = next(obj for obj in created if obj.type == "FONT")
+    midpoint = np.asarray(measurement.points, dtype=float).mean(axis=0)
+    assert label.location.x == pytest.approx(midpoint[0] + 3.0 * scale)
+    assert label.location.z == pytest.approx(midpoint[2])
+
+
+@requires_mn
 def test_angle_draws_two_rays_and_an_arc(site_molecule):
     from blender_gala.measure import draw, measurements
 

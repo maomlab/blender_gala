@@ -29,6 +29,7 @@ except ImportError:  # pragma: no cover
 __all__ = [
     "arc_points",
     "billboard",
+    "clear_of_occluders",
     "dash_segments",
     "dihedral_arc_points",
     "make_card",
@@ -374,6 +375,107 @@ def make_line(
         gala_type=gala_type,
         **properties,
     )
+
+
+def clear_of_occluders(
+    position: np.ndarray,
+    clearance: float,
+    extent: float = 0.0,
+    scene: Any = None,
+) -> tuple[np.ndarray, float]:
+    """Move a label towards the camera until nothing is in front of it.
+
+    A label anchored on an atom inside a protein is behind that protein from
+    almost every angle, and a fixed offset does not help: the direction that
+    clears the geometry depends on where the camera is. So the ray from the
+    camera to the anchor is cast, and if anything is hit on the way the label
+    moves to ``clearance`` in front of it.
+
+    View dependent, deliberately. For a still it does what the eye wants; for
+    an orbit, pass ``avoid_occlusion=False`` and place the labels yourself,
+    since no single position is in front from every frame.
+
+    Parameters
+    ----------
+    position : numpy.ndarray
+        Where the label would go.
+    clearance : float
+        How far in front of the occluder to sit, in Blender units.
+    extent : float, optional
+        Half the size of the label. A label is a card, not a point, so its
+        corners are tested as well as its centre — testing the centre alone
+        leaves a label whose middle happens to see through a gap with its
+        edges still buried.
+    scene : bpy.types.Scene, optional
+        Scene to cast in. Defaults to the active one.
+
+    Returns
+    -------
+    tuple of (numpy.ndarray, float)
+        Where to put the label, and what to multiply its size by. Moving a
+        label along the ray it is already on leaves it at the same place on
+        screen, but nearer the camera, so it is drawn bigger — the factor
+        cancels that out, and the move becomes invisible except for the
+        occluder it escaped. Unchanged and 1.0 when there is no camera or
+        nothing in the way.
+    """
+    bpy_mod = _require_bpy()
+    scene = scene or bpy_mod.context.scene
+    camera = getattr(scene, "camera", None)
+    if camera is None:
+        return position, 1.0
+
+    origin = np.array(camera.matrix_world.translation, dtype=float)
+    delta = np.asarray(position, dtype=float) - origin
+    distance = float(np.linalg.norm(delta))
+    if distance <= 1e-9:
+        return position, 1.0
+    direction = delta / distance
+
+    # The label's own plane, to spread the samples over: it faces the camera,
+    # so its axes are the camera's.
+    right = np.cross(direction, np.array([0.0, 0.0, 1.0], dtype=float))
+    if np.linalg.norm(right) < 1e-6:
+        right = np.array([1.0, 0.0, 0.0], dtype=float)
+    right /= np.linalg.norm(right)
+    up = np.cross(right, direction)
+
+    # A three by three grid over the card, not just its corners: a ribbon
+    # crossing the middle of a label passes between four corner rays and
+    # leaves the label buried with its corners in clear air.
+    samples = [np.asarray(position, dtype=float)]
+    if extent > 0.0:
+        samples += [
+            position + right * sx * extent + up * sy * extent
+            for sx in (-1.0, 0.0, 1.0)
+            for sy in (-1.0, 0.0, 1.0)
+            if (sx, sy) != (0.0, 0.0)
+        ]
+
+    depsgraph = bpy_mod.context.evaluated_depsgraph_get()
+    blocked_at = distance
+    for sample in samples:
+        towards = np.asarray(sample, dtype=float) - origin
+        reach = float(np.linalg.norm(towards))
+        if reach <= 1e-9:
+            continue
+        hit, location, *_ = scene.ray_cast(
+            depsgraph,
+            origin=origin,
+            direction=towards / reach,
+            distance=reach,
+        )
+        if hit:
+            blocked_at = min(
+                blocked_at,
+                float(np.linalg.norm(np.array(location, dtype=float) - origin)),
+            )
+    moved_to = max(blocked_at - clearance, 1e-4)
+    if moved_to >= distance:
+        # Nothing between the camera and the label that it is not already in
+        # front of.
+        return position, 1.0
+    return origin + direction * moved_to, moved_to / distance
 
 
 def make_text(
