@@ -128,7 +128,7 @@ heading("5. Label the pocket")
 # Only the residues in closest contact, and sized for the close-up below
 # rather than for the whole protein. Naming all sixteen pocket residues at this
 # range stacks the cards on top of each other and on the site they describe.
-CLOSEST = f"byres (protein within 3.6 of ({LIGAND}))"
+CLOSEST = f"byres (protein within 3.4 of ({LIGAND}))"
 
 labels = gala.label(
     mol,
@@ -154,7 +154,6 @@ heading("6. Frame the site rather than the whole protein")
 # allowed out of shot. Framing `mol` here — which this used to do, despite the
 # heading — put the whole 917-atom protein in the frame and left the site a
 # knot in the middle of it.
-SITE = f"({POCKET}) or ({LIGAND})"
 
 # Look into the pocket rather than from a fixed compass point. The direction
 # out of the protein through the ligand is where the site opens, so that is
@@ -173,12 +172,16 @@ viewpoint = (
 )
 print(f"  looking in along ({viewpoint[0]:.0f} deg, {viewpoint[1]:.0f} deg)")
 
-# The margin has to clear the labels, which sit outside the atoms they name.
-gala.frame_target(mol, selection=SITE, viewpoint=viewpoint, margin=1.7)
+# Framed on the ligand with room around it, rather than on the pocket. A
+# `byres` selection pulls in whole residues, so "the pocket" reaches as far as
+# the backbone of anything with a side chain pointing in — a much wider shot
+# than the site itself. The margin is what sets how much context comes with
+# it, and it has to clear the labels, which sit outside the atoms they name.
+gala.frame_target(mol, selection=LIGAND, viewpoint=viewpoint, margin=2.6)
 # Focus on the ligand, not on the molecule's origin: that sits at the protein
 # centroid, several angstrom behind the site, and at this aperture that is the
 # difference between a sharp ligand and a blurred one.
-gala.depth_of_field(mol, selection=LIGAND, fstop=4.0)
+gala.depth_of_field(mol, selection=LIGAND, fstop=11.0)
 
 
 # ---------------------------------------------------------------------------
