@@ -9,6 +9,7 @@ sign of a torsion legible.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -35,8 +36,9 @@ def draw_measurement(
     label: bool = True,
     label_template: str | None = None,
     label_size: float = 1.5,
-    label_offset: float = 0.5,
+    label_offset: float | Sequence[float] = 0.5,
     label_card: bool = True,
+    label_avoid_occlusion: bool = True,
     arc: bool = True,
     scale: float | None = None,
 ) -> list[Any]:
@@ -69,8 +71,16 @@ def draw_measurement(
     label_card : bool, optional
         Put a translucent pill behind the value, so white text stays readable
         over a pale molecule.
-    label_offset : float, optional
-        How far to lift the label off the line, in ångström.
+    label_offset : float or sequence of float, optional
+        Offset from the line, in ångström. A scalar lifts the label along
+        ``+Z``; a 3-sequence offsets in all axes, which is how a value is
+        moved *across the frame* rather than up it when two measurements
+        would otherwise label the same patch of screen.
+    label_avoid_occlusion : bool, optional
+        Move the value towards the camera until nothing is in front of it. The
+        atoms worth measuring between are usually inside the molecule, and a
+        label at the midpoint is then behind the geometry that surrounds them.
+        View dependent: turn it off for an orbit.
     arc : bool, optional
         Draw the arc for angles and dihedrals.
     scale : float, optional
@@ -153,14 +163,33 @@ def draw_measurement(
                 kind=measurement.kind,
             )
         )
-        anchor = _label_anchor(measurement, points)
-        anchor = anchor + np.array([0.0, 0.0, label_offset * scale])
+        if isinstance(label_offset, (int, float)):
+            offset_vector = np.array([0.0, 0.0, float(label_offset)]) * scale
+        else:
+            offset_vector = np.asarray(label_offset, dtype=float) * scale
+        anchor = _label_anchor(measurement, points) + offset_vector
+        magnification = 1.0
+        if label_avoid_occlusion:
+            anchor, magnification = geometry.clear_of_occluders(
+                anchor,
+                float(np.linalg.norm(offset_vector)) or 2.0 * scale,
+                extent=0.7 * label_size * scale * len(text) ** 0.5,
+            )
         text_object = geometry.make_text(
             f"{name} label",
             text,
             anchor,
-            size=label_size * scale,
-            material=gala_materials.get_material("label"),
+            size=label_size * scale * magnification,
+            # Tinted like the line it belongs to. Two measurements in one
+            # figure are told apart by colour, and a value in the default
+            # white belongs to neither of them.
+            material=gala_materials.build_material(
+                gala_materials.MATERIAL_PRESETS["label"].with_(
+                    base_color=(*colour, 1.0), emission_color=(*colour, 1.0)
+                ),
+                name="GALA Measurement Label "
+                + "".join(f"{round(channel * 255):02x}" for channel in colour),
+            ),
             collection=gala_collections.MEASUREMENTS,
             gala_type=f"measurement_label_{measurement.kind}",
             value=measurement.value,

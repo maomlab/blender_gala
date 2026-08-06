@@ -44,8 +44,18 @@ protein. The full Objective 2 workflow.
 
 ![03_measurements](images/03_measurements.png)
 
-`03_measurements.py` — a distance, an angle and a dihedral, drawn with arcs and
-value labels, plus what happens when a selection is ambiguous.
+`03_measurements.py` — the distance that decides whether a GPCR is activated.
+Aranda-García et al.
+([Nat Commun 16, 2020](https://doi.org/10.1038/s41467-025-57034-y)) define the
+state of a class A receptor by the distance between two alpha carbons, one on
+TM2 and one on TM6, and give the thresholds that sort a structure into closed,
+intermediate or open. The vignette measures exactly that on the adenosine A2A
+receptor in both states — 5UIG with an antagonist bound, 6GDG coupled to
+mini-Gs — superposing them with Kabsch onto a common frame first, so what is
+left is the receptor's own motion: 12.70 Å closed, 17.59 Å open, TM6 out by
+4.9 Å. It also shows what happens when a selection is ambiguous, and how
+`measure` dispatches on two, three or four atoms to give a distance, an angle
+or a dihedral.
 
 ## 4. AlphaFold confidence
 
