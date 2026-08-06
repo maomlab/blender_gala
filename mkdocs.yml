@@ -14,6 +14,11 @@ use_directory_urls: false
 
 theme:
   name: material
+  # A G whose stroke is a chain, with atoms at its ends. The logo is knocked
+  # out white because the header bar is itself teal; the favicon keeps the
+  # palette, since a tab is not teal.
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
   features:
     - navigation.instant
     - navigation.tracking

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-label="Blender Gala">
+  <title>Blender Gala</title>
+  <!-- The same mark knocked out for the header, which is itself teal. The two
+       atoms stay tinted rather than going white, so the chain still reads as
+       a chain at 24 px. -->
+  <path d="M45 19 A18 18 0 1 0 45 45 L45 34 L33 34"
+        fill="none" stroke="#ffffff" stroke-width="8"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="45" cy="19" r="6.5" fill="#cfeae6"/>
+  <circle cx="33" cy="34" r="6" fill="#ffc4ad"/>
+</svg>
