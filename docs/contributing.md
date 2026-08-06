@@ -135,8 +135,10 @@ consistent with each other between runs.
 
 ## Releasing
 
-1. Bump `version` in `blender_gala/blender_manifest.toml`, the single source of
-   truth; `blender_gala.__version__` reads it.
+1. Bump `version` in `blender_gala/blender_manifest.toml`. It is the only place
+   the version is written: `blender_gala.__version__` reads it at run time,
+   `make help` reads it, and hatchling reads it for the wheel metadata, so
+   there is nothing else to keep in step.
 2. `make check`
 3. `make build` and test the resulting zip in a clean Blender.
 4. Tag and push; CI attaches the extension zip to the release.

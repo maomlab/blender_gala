@@ -1,6 +1,10 @@
 [project]
 name = "blender-gala"
-version = "0.1.0"
+# Read from blender_manifest.toml rather than restated here. Blender requires
+# a literal version in the manifest, `blender_gala.__version__` reads it at
+# runtime, and the Makefile reads it for `make help` — so the manifest is the
+# one place it can live, and a copy here would be a second place to forget.
+dynamic = ["version"]
 description = "Tools to support using Blender for structural biology visualization and exploration"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,6 +47,10 @@ Source = "https://github.com/maomlab/blender_gala"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "blender_gala/blender_manifest.toml"
+pattern = '^version\s*=\s*"(?P<version>[^"]+)"'
 
 [tool.hatch.build.targets.wheel]
 packages = ["blender_gala"]

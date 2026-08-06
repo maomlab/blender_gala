@@ -437,7 +437,7 @@ a **Gala** tab: *Scene Setup*, *Materials & Lighting*, *Interactions*,
 | Types | `mypy` on `blender_gala/`, with `bpy`/`biotite`/`scipy` treated as untyped third-party. `fake-bpy-module` supplies `bpy` stubs in CI. |
 | CI | GitHub Actions: lint + typecheck job on system Python; test job downloading Blender 5.1 and 5.2 LTS and running the headless suite on both. |
 | Build | `make build` produces `dist/blender_gala-<version>.zip` via `blender --command extension build`. |
-| Versioning | SemVer, single source of truth in `blender_manifest.toml`, read by `blender_gala.__version__`. |
+| Versioning | SemVer, single source of truth in `blender_manifest.toml` — Blender requires a literal version there, so everything else derives from it: `blender_gala.__version__` reads it at run time, `make help` greps it, and `[tool.hatch.version]` reads it for the wheel rather than `pyproject.toml` restating it. |
 | Docs | MkDocs Material with `use_directory_urls: false`, so the built site is browsable straight off disk — clean URLs point at directories, which only a web server resolves. `scripts/check_links.py` fails the build on any internal link that does not resolve. API reference generated with `mkdocstrings`; vignettes are executable Python scripts that are *run* in CI and produce the images embedded in the docs. |
 
 **D-22. Vignettes are executable and rendered by CI.** A tutorial that has
