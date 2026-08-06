@@ -313,12 +313,14 @@ def electrostatic_surface(
     target: Any,
     grid: PotentialGrid | None = None,
     ramp: float = RAMP,
-    alpha: float = 0.55,
+    alpha: float | None = None,
     probe: float = PROBE_RADIUS,
     quality: int = 3,
     add_style: bool = True,
     cmap: str = "bwr",
+    material: str = "surface",
     material_options: dict[str, Any] | None = None,
+    style_options: dict[str, Any] | None = None,
     **apbs_options: Any,
 ) -> ElectrostaticSurface:
     """Build the translucent, potential-coloured surface of a molecule.
@@ -336,8 +338,9 @@ def electrostatic_surface(
     ramp : float, optional
         Saturation point of the colour ramp, in kT/e.
     alpha : float, optional
-        Surface opacity. ``1`` is solid; the default lets a cartoon inside
-        show through, which is the point of a translucent surface.
+        Surface opacity, for the alpha-blended materials. ``None`` keeps
+        whatever the preset says — which is what ``"glass_surface"`` wants,
+        since it is transparent by refracting rather than by blending.
     probe : float, optional
         Probe radius, in ångström. Used both for the surface Molecular Nodes
         builds and for where the potential is read, because they are the same
@@ -349,11 +352,22 @@ def electrostatic_surface(
         have set up yourself.
     cmap : str, optional
         Colormap name.
+    material : str, optional
+        Material preset for the surface. ``"surface"`` is alpha-blended and
+        cheap; ``"glass_surface"`` refracts, which costs samples and can focus
+        light onto whatever is inside — see
+        :func:`~blender_gala.scene.render.enable_caustics`.
     material_options : dict, optional
         Overrides for the surface material, as fields of
         :class:`~blender_gala.scene.materials.GalaMaterialSpec` — ``roughness``
         is the one worth reaching for, since a glossy translucent surface
         carries enough highlight to wash the ramp out.
+    style_options : dict, optional
+        Overrides for Molecular Nodes' surface style: ``probe_size`` and
+        ``relaxation_steps`` decide how knobbly the shell is, which matters
+        more than usual when it is made of glass and every bump is a lens.
+        Kept separate from ``probe`` because how smooth the surface looks and
+        where the potential is read are different questions.
     **apbs_options
         Forwarded to :func:`blender_gala.electrostatics.apbs.run_apbs`.
 
@@ -374,28 +388,33 @@ def electrostatic_surface(
         molecule = target
     if add_style and molecule is not None:
         mn = mn_bridge.require_mn()
-        molecule.add_style(
-            mn.StyleSurface(
-                quality=quality,
-                probe_size=probe,
-                # Nearest atom rather than the residue's alpha carbon: the
-                # potential varies across a residue, and reading it per
-                # residue throws that away.
-                color_source="Nearest",
-                color_blur=2,
-                shade_smooth=True,
-            ),
-            color=None,
-        )
+        settings = {
+            "quality": quality,
+            "probe_size": probe,
+            # Nearest atom rather than the residue's alpha carbon: the
+            # potential varies across a residue, and reading it per residue
+            # throws that away.
+            "color_source": "Nearest",
+            "color_blur": 2,
+            "shade_smooth": True,
+        }
+        settings.update(style_options or {})
+        molecule.add_style(mn.StyleSurface(**settings), color=None)
 
-    material = gala_materials.build_material(
-        gala_materials.MATERIAL_PRESETS["surface"].with_(
-            alpha=alpha, **(material_options or {})
-        ),
+    overrides = dict(material_options or {})
+    if alpha is not None:
+        overrides["alpha"] = alpha
+    if material not in gala_materials.MATERIAL_PRESETS:
+        raise ValueError(
+            f"unknown material preset {material!r}; "
+            f"choose from {sorted(gala_materials.MATERIAL_PRESETS)}"
+        )
+    built = gala_materials.build_material(
+        gala_materials.MATERIAL_PRESETS[material].with_(**overrides),
         name="GALA Electrostatic Surface",
     )
     styles = gala_materials.assign_material(
-        molecule if molecule is not None else structure, material, style="surface"
+        molecule if molecule is not None else structure, built, style="surface"
     )
 
     return ElectrostaticSurface(
@@ -403,6 +422,6 @@ def electrostatic_surface(
         potential=potential,
         colors=colours,
         ramp=abs(ramp),
-        material=material,
+        material=built,
         styles=styles,
     )

@@ -103,15 +103,75 @@ Electrostatic surface
   beyond   : 6.3% of atoms saturate the ramp
 ```
 
-## Transparency
+## Transparency, and glass
 
-`alpha` sets the surface's opacity, and the material uses alpha blending
-rather than transmission: it renders far faster and avoids the caustic
-fireflies a glass-like surface produces. Anything inside — a cartoon, a
-ligand, the partner it binds — shows through.
+There are two ways to see through the surface, and they are not the same
+picture.
 
-A translucent surface picks up specular highlights that can bleach the ramp;
-`material_options={"roughness": 0.45, "specular": 0.25}` takes the shine off.
+`material="surface"` (the default) is **alpha blending**: the surface is mixed
+with whatever is behind it, `alpha` says in what proportion, and it costs
+almost nothing to render. Use it when the figure is about the map.
+
+```python
+gala.electrostatic_surface(mol, alpha=0.6)
+```
+
+`material="glass_surface"` is **transmission**: the shell refracts. The
+cartoon under it bends as it moves, the rim picks up total internal
+reflection, and light that crosses the shell can be focused onto what is
+inside. This is the part a rasterised viewer cannot do at any setting, because
+there is no light path there to follow.
+
+```python
+gala.electrostatic_surface(
+    mol,
+    material="glass_surface",
+    material_options={"roughness": 0.06, "color_mix": 0.62,
+                      "transmission_weight": 0.85},
+    style_options={"probe_size": 2.2, "relaxation_steps": 40},
+)
+```
+
+Three settings there are worth knowing, because glass punishes the defaults:
+
+- **`color_mix`** dilutes the potential colour towards white. Light crossing
+  coloured glass is tinted going in and again coming out, so a saturated ramp
+  turns the inside of the surface into a dark gemstone.
+- **`transmission_weight`** a little short of 1 leaves a diffuse fraction. A
+  perfect refractor shows its colour only where light grazes it — the rim —
+  and the ramp stops reading straight on.
+- **`style_options`** smooth the shell. At the default probe every atom is a
+  bump, and in glass every bump is a lens with its own highlight; the figure
+  comes out as wet gravel. A wider probe and more relaxation give one surface
+  instead of three hundred lenses.
+
+Glass also wants an environment to refract — `lighting_style="both"` puts a
+studio HDRI under the three-point rig — and it wants more light than an opaque
+molecule, since what reaches the interior has crossed the shell twice.
+
+## Caustics
+
+Cycles will not show a caustic unless it is asked three times over, which is
+what [`enable_caustics`][blender_gala.scene.render.enable_caustics] does:
+
+```python
+gala.enable_caustics(casters=[surface_mol], receivers=[cartoon_mol])
+```
+
+- the renderer's caustic paths are off by default;
+- the glossy filter blurs what does get through, which is what turns a caustic
+  into a smudge, so it is set to zero;
+- and manifold next event estimation, the shortcut that makes caustics
+  affordable, only runs between an object told it is the caster and one told
+  it is the receiver — which is why the surface and the cartoon under it have
+  to be **separate objects**, one molecule each.
+
+Call it after the scene is set up: until the lights exist there is nothing to
+allow. On the barnase figure it changes 19% of the pixels and brightens the
+interior by about 1%, all of it light that arrived by refraction.
+
+Caustics are the noisiest thing in a frame and the last to converge, so budget
+samples for them — the vignette quadruples the preset's.
 
 ## What this is not
 

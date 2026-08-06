@@ -287,6 +287,53 @@ def test_invalid_lighting_arguments(clean_scene):
 
 
 # ---------------------------------------------------------------------------
+# Caustics
+# ---------------------------------------------------------------------------
+
+
+def test_enable_caustics_asks_cycles_all_three_times(clean_scene):
+    """The paths, the filter and the caster/receiver pair — miss one and a
+    caustic never appears."""
+    import bpy
+
+    from blender_gala.scene import render as gala_render
+
+    glass = bpy.data.objects.new("glass", bpy.data.meshes.new("glass"))
+    floor = bpy.data.objects.new("floor", bpy.data.meshes.new("floor"))
+    lamp = bpy.data.objects.new("lamp", bpy.data.lights.new("lamp", type="AREA"))
+    for obj in (glass, floor, lamp):
+        clean_scene.collection.objects.link(obj)
+
+    report = gala_render.enable_caustics(
+        casters=glass, receivers=[floor], scene=clean_scene
+    )
+
+    assert clean_scene.cycles.caustics_refractive
+    assert clean_scene.cycles.blur_glossy == pytest.approx(0.0)
+    assert clean_scene.cycles.transmission_bounces >= 24
+    assert glass.cycles.is_caustics_caster
+    assert floor.cycles.is_caustics_receiver
+    assert lamp.data.cycles.is_caustics_light, "every light, when none is named"
+    assert (report.casters, report.receivers, report.lights) == (1, 1, 1)
+
+
+def test_enable_caustics_takes_a_molecule_as_well_as_an_object(clean_scene):
+    """The rest of the API takes molecules, so this one does too."""
+    import bpy
+
+    from blender_gala.scene import render as gala_render
+
+    obj = bpy.data.objects.new("shell", bpy.data.meshes.new("shell"))
+    clean_scene.collection.objects.link(obj)
+
+    class FakeMolecule:
+        object = obj
+
+    gala_render.enable_caustics(casters=FakeMolecule(), lights=[], scene=clean_scene)
+    assert obj.cycles.is_caustics_caster
+
+
+# ---------------------------------------------------------------------------
 # Materials
 # ---------------------------------------------------------------------------
 
@@ -352,6 +399,39 @@ def test_ambient_occlusion_is_opt_in():
         if n.bl_idname == "ShaderNodeAmbientOcclusion"
     )
     assert ao.outputs["Color"].is_linked
+
+
+def test_the_glass_surface_actually_transmits():
+    """A translucent surface blends; a glass one refracts, and only the second
+    can bend what is behind it or focus light onto it."""
+    from blender_gala.scene import materials
+
+    material = materials.build_material("glass_surface", name="GALA Test Glass")
+    principled = next(
+        n for n in material.node_tree.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled"
+    )
+    assert principled.inputs["Transmission Weight"].default_value == pytest.approx(1.0)
+    assert principled.inputs["Thin Wall"].default_value is True
+    assert principled.inputs["Alpha"].default_value == pytest.approx(1.0)
+
+
+def test_colour_mix_dilutes_the_attribute_colour():
+    """Coloured glass tints twice over, so a surface material has to be able
+    to take less than all of the colour written to the mesh."""
+    from blender_gala.scene import materials
+
+    spec = materials.MATERIAL_PRESETS["surface"].with_(color_mix=0.4)
+    material = materials.build_material(spec, name="GALA Test Mix")
+    principled = next(
+        n for n in material.node_tree.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled"
+    )
+    mix = principled.inputs["Base Color"].links[0].from_node
+
+    assert mix.bl_idname == "ShaderNodeMix"
+    assert mix.inputs["Factor"].default_value == pytest.approx(0.4)
+    # The attribute feeds the second colour input; the first is the base.
+    colours = [socket for socket in mix.inputs if socket.type == "RGBA"]
+    assert colours[1].is_linked and not colours[0].is_linked
 
 
 def test_unknown_material_preset_raises():

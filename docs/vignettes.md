@@ -101,5 +101,11 @@ PDB2PQR and APBS, then opened out like a book so both binding faces are in
 view. Barnase's is a patch of positive, barstar's is a patch of negative, and
 the two are shaped like each other — which is why they associate as fast as
 they do. The vignette also puts a number on it: the mean potential over each
-partner's interface against the mean over the rest of its surface. Needs
-`apbs` and `pdb2pqr`; `pip install apbs-binary pdb2pqr`, or `make apbs`.
+partner's interface against the mean over the rest of its surface.
+
+The surface is thin glass rather than an alpha-blended film, with the cartoon
+underneath showing through it and refracted by it, and Cycles' caustics turned
+on so the key light focuses through the shell onto the fold inside. That is
+the argument for rendering a molecule in a path tracer rather than a viewer:
+the same map, lit rather than drawn. Needs `apbs` and `pdb2pqr`;
+`pip install apbs-binary pdb2pqr`, or `make apbs`.

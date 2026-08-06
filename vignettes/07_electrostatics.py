@@ -1,4 +1,4 @@
-"""Vignette 7 — electrostatics, solved rather than eyeballed.
+"""Vignette 7 — electrostatics, solved rather than eyeballed, and lit.
 
 Barnase cuts RNA; barstar stops it by binding to its active site with one of
 the tightest protein-protein affinities known. The reason is visible as soon
@@ -11,7 +11,13 @@ shaped like each other.
 
 This is what the PyMOL APBS plugin does, in Blender: PDB2PQR assigns charges
 and radii, APBS solves the Poisson-Boltzmann equation on a grid around the
-molecule, and the potential is painted onto a translucent molecular surface.
+molecule, and the potential is painted onto a molecular surface.
+
+Where Blender goes further is what the surface is made of. Here it is thin
+glass rather than an alpha-blended film: it refracts the cartoon underneath,
+picks up total internal reflection around the rim, and focuses the key light
+into caustics on the fold inside. A rasterised viewer cannot do that at any
+setting, because there is no such thing there as a light path.
 
 Needs `apbs` and `pdb2pqr`. Both install with pip::
 
@@ -37,6 +43,7 @@ import bpy
 
 from blender_gala.core.entity import AtomStructure
 from blender_gala.electrostatics.apbs import ApbsUnavailable
+from blender_gala.scene import materials as gala_materials
 
 #: 1BRS holds three copies of the complex; A/D is one of them.
 BARNASE = "A"
@@ -65,7 +72,15 @@ array = complex_structure.array
 
 
 def partner(chain: str, name: str):
-    """Write one chain out and load it back as a molecule of its own."""
+    """Write one chain out and load it back as two molecules of its own.
+
+    Two, because the surface and the cartoon under it want different things
+    from the same atoms. Molecular Nodes colours every style on an object from
+    one ``Color`` attribute, so a cartoon sharing the surface's object would
+    be painted with the potential as well; and Cycles decides what casts a
+    caustic and what receives one per object, so the glass and the thing it
+    focuses light onto cannot be the same one.
+    """
     from biotite.structure.io.pdb import PDBFile
 
     subset = array[(array.chain_id == chain) & (array.element != "H")]
@@ -74,16 +89,18 @@ def partner(chain: str, name: str):
     pdb.set_structure(subset)
     pdb.write(path)
 
-    molecule = mn.Molecule.load(path)
-    molecule.object.name = name
-    return molecule, subset
+    shell = mn.Molecule.load(path)
+    shell.object.name = f"{name} surface"
+    inside = mn.Molecule.load(path)
+    inside.object.name = f"{name} cartoon"
+    return shell, inside, subset
 
 
 # The whole complex was only ever a source of coordinates.
 bpy.data.objects.remove(complex_structure.object, do_unlink=True)
 
-barnase, barnase_atoms = partner(BARNASE, "barnase")
-barstar, barstar_atoms = partner(BARSTAR, "barstar")
+barnase, barnase_cartoon, barnase_atoms = partner(BARNASE, "barnase")
+barstar, barstar_cartoon, barstar_atoms = partner(BARSTAR, "barstar")
 print(f"  barnase: {barnase_atoms.array_length()} atoms, chain {BARNASE}")
 print(f"  barstar: {barstar_atoms.array_length()} atoms, chain {BARSTAR}")
 
@@ -121,24 +138,63 @@ for name, run in runs.items():
 # ---------------------------------------------------------------------------
 heading("3. The potential, on the surface")
 # ---------------------------------------------------------------------------
-# Translucent, so the partner behind shows through, and so the far side of
-# each surface reads as a surface rather than as a silhouette.
+# Thin glass rather than an alpha-blended film. A blended surface is a flat
+# wash over whatever is behind it; glass refracts, so the fold inside bends as
+# it moves under the shell, the rim picks up total internal reflection, and
+# the light that gets through can be focused. None of that is a trick a
+# rasterised viewer can do — it is the reason to render a molecule in a path
+# tracer at all.
 surfaces = {
     name: gala.electrostatic_surface(
         molecule,
         grid=runs[name].grid,
         ramp=RAMP,
-        alpha=0.68,
         quality=4,
-        # Matte rather than the preset's wet look: a glossy translucent
-        # surface reflects enough of the key light to bleach the ramp.
-        material_options={"roughness": 0.45, "specular": 0.25},
+        material="glass_surface",
+        # Not perfectly polished: a little roughness keeps the ramp legible
+        # through the shell, where a mirror finish would show mostly highlight.
+        material_options={
+            "roughness": 0.06,
+            "color_mix": 0.62,
+            # A little short of full transmission. The remaining fraction is
+            # diffuse, and it is what keeps the ramp readable straight on: a
+            # perfect refractor only shows its colour where the light grazes
+            # it, which is the rim.
+            "transmission_weight": 0.85,
+        },
+        # A shell smooth enough to be glass. At the default probe every atom
+        # is a bump, and every bump is a lens with its own highlight: the
+        # figure comes out as wet gravel. A wider probe and more relaxation
+        # give one surface rather than three hundred lenses.
+        style_options={"probe_size": 2.2, "relaxation_steps": 40},
     )
     for name, molecule in (("barnase", barnase), ("barstar", barstar))
 }
 for name, surface in surfaces.items():
     print(f"  {name}")
     print("    " + surface.summary().replace("\n", "\n    "))
+
+# The cartoon under the glass is deliberately colourless: the colour in this
+# figure means potential, and a second colour scheme inside the surface would
+# be a second thing to decode.
+interior = gala_materials.build_material(
+    gala_materials.GalaMaterialSpec(
+        base_color=(0.86, 0.88, 0.91, 1.0),
+        use_attribute_color=False,
+        roughness=0.42,
+        subsurface_weight=0.05,
+        # Faintly self-lit. Two crossings of a coloured shell take most of
+        # what the lights send in, and a cartoon that is only lit is a dark
+        # shape rather than a fold you can follow.
+        emission_color=(0.86, 0.88, 0.91, 1.0),
+        emission_strength=0.25,
+        description="Neutral cartoon, seen through the potential surface.",
+    ),
+    name="GALA Interior Cartoon",
+)
+for molecule in (barnase_cartoon, barstar_cartoon):
+    molecule.add_style("cartoon", color=None)
+    gala_materials.assign_material(molecule, interior, style="cartoon")
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +252,7 @@ viewpoint = viewpoint_across(axis)
 print(f"  looking across the interface from ({viewpoint[0]:.0f}, {viewpoint[1]:.0f})")
 
 
-def open_the_book(molecules, axis: np.ndarray, gap: float) -> None:
+def open_the_book(groups, axis: np.ndarray, gap: float) -> None:
     """Swing both partners open so each shows the face the other binds.
 
     Docked, each interface is behind the partner covering it and the figure
@@ -223,18 +279,20 @@ def open_the_book(molecules, axis: np.ndarray, gap: float) -> None:
     vertical = np.array([0.0, 0.0, 1.0])
     heights = [
         float(
-            np.dot(AtomStructure.from_any(m).world_positions().mean(axis=0), vertical)
+            np.dot(
+                AtomStructure.from_any(group[0]).world_positions().mean(axis=0),
+                vertical,
+            )
         )
-        for m in molecules
+        for group in groups
     ]
     level = sum(heights) / len(heights)
 
-    for molecule, turn, slide, height in zip(
-        molecules, (90.0, -90.0), (-1.0, 1.0), heights, strict=True
+    for group, turn, slide, height in zip(
+        groups, (90.0, -90.0), (-1.0, 1.0), heights, strict=True
     ):
-        obj = molecule.object
         centre = np.array(
-            AtomStructure.from_any(molecule).world_positions().mean(axis=0)
+            AtomStructure.from_any(group[0]).world_positions().mean(axis=0)
         )
         rotation = mathutils.Matrix.Rotation(
             np.radians(turn), 4, mathutils.Vector(up.tolist())
@@ -245,9 +303,11 @@ def open_the_book(molecules, axis: np.ndarray, gap: float) -> None:
         # runs diagonally across the frame wastes two corners of it.
         shift = sideways * slide * gap * scale + vertical * (level - height)
         offset = mathutils.Matrix.Translation(mathutils.Vector(shift.tolist()))
-        obj.matrix_world = (
-            offset @ pivot @ rotation @ pivot.inverted() @ obj.matrix_world
-        )
+        for molecule in group:
+            obj = molecule.object
+            obj.matrix_world = (
+                offset @ pivot @ rotation @ pivot.inverted() @ obj.matrix_world
+            )
     bpy.context.view_layer.update()
 
 
@@ -257,12 +317,23 @@ radius = max(
     np.linalg.norm(atoms.coord - atoms.coord.mean(axis=0), axis=1).max()
     for atoms in (barnase_atoms, barstar_atoms)
 )
-open_the_book((barnase, barstar), axis, gap=radius * 0.3)
+open_the_book(
+    ((barnase, barnase_cartoon), (barstar, barstar_cartoon)), axis, gap=radius * 0.3
+)
 
 gala.publication_setup(
     barnase,
     preset=QUALITY,
-    lighting_style="three_point",
+    # Glass needs an environment to refract, not just three lamps: with
+    # nothing but key, fill and rim, every ray that misses one of them comes
+    # back black, and the shell reads as a dark gemstone. `both` puts a
+    # studio HDRI under the rig, which is what gives the surface something to
+    # bend. It also eats light — what reaches the cartoon inside has crossed
+    # the shell twice — so the rig runs hotter than it would on an opaque
+    # molecule.
+    lighting_style="both",
+    hdri="studio",
+    light_energy=1.6,
     # The materials are the ones the surfaces were given; a scheme here would
     # overwrite the translucency that is the point of the figure.
     material_scheme=None,
@@ -286,5 +357,24 @@ for name, molecule in (("barnase", barnase), ("barstar", barstar)):
 # Framing measures atoms, and the surface stands a probe radius and a bit
 # further out than the outermost of them, so the margin has to cover the skin
 # as well as the labels.
+# Cycles will not show a caustic unless it is asked three times over: the
+# caustic paths are off, the glossy filter blurs what does get through, and
+# the shortcut that makes them affordable only runs between an object told it
+# is the caster and one told it is the receiver. This has to come after the
+# scene is set up, because until then there are no lights to allow.
+caustics = gala.enable_caustics(
+    casters=[barnase, barstar],
+    receivers=[barnase_cartoon, barstar_cartoon],
+)
+print(f"  {caustics}")
+
 gala.frame_target(margin=1.2, viewpoint=viewpoint)
+
+# A caustic is light that reached the camera by an unlikely route, so it is
+# the noisiest thing in the frame and the last to converge. Four times the
+# preset's samples, rather than a bigger preset, because it is this figure
+# that needs them and not the render settings in general.
+scene = bpy.context.scene
+scene.cycles.samples *= 4
+print(f"  {scene.cycles.samples} samples, for the caustics")
 render(gala, "07_electrostatics")

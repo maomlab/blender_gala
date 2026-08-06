@@ -55,6 +55,12 @@ class GalaMaterialSpec:
         Read the per-atom ``Color`` attribute into Base Color. Leave ``True``
         for anything driven by Molecular Nodes; ``False`` for decorations such
         as measurement dashes.
+    color_mix : float
+        How much of that attribute colour to keep, mixed towards
+        ``base_color``. ``1`` is the colour as written. Below 1 matters for
+        transmissive materials: light crossing coloured glass is tinted on the
+        way in and again on the way out, so a saturated ramp turns the inside
+        of the surface into a dark gemstone.
     roughness : float
         0 is a mirror, 1 is fully diffuse.
     metallic : float
@@ -78,6 +84,15 @@ class GalaMaterialSpec:
         Emission colour.
     alpha : float
         Opacity. Below 1 switches the material to alpha blending.
+    transmission_weight : float
+        Transmission weight. Above 0 the surface refracts what is behind it
+        rather than blending with it, which is what makes caustics possible
+        and what makes the render cost real.
+    thin_wall : bool
+        Treat the surface as a film with no thickness. A molecular surface is
+        a shell around a protein, not a solid lump of glass, and rendering it
+        as one gives the light a long dense path through the middle that comes
+        out dark and slow.
     ao_strength : float
         Ambient occlusion mix, 0 to 1. Off by default.
     ao_distance : float
@@ -90,6 +105,7 @@ class GalaMaterialSpec:
 
     base_color: tuple[float, float, float, float] = (0.8, 0.8, 0.8, 1.0)
     use_attribute_color: bool = True
+    color_mix: float = 1.0
     roughness: float = 0.45
     metallic: float = 0.0
     ior: float = 1.45
@@ -101,6 +117,8 @@ class GalaMaterialSpec:
     emission_strength: float = 0.0
     emission_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
     alpha: float = 1.0
+    transmission_weight: float = 0.0
+    thin_wall: bool = False
     ao_strength: float = 0.0
     ao_distance: float = 0.05
     shadow: bool = True
@@ -141,6 +159,20 @@ MATERIAL_PRESETS: dict[str, GalaMaterialSpec] = {
         description=(
             "Translucent molecular surface. Uses alpha blending rather than "
             "transmission: it renders far faster and avoids caustic fireflies."
+        ),
+    ),
+    "glass_surface": GalaMaterialSpec(
+        base_color=(0.94, 0.95, 0.97, 1.0),
+        color_mix=0.35,
+        roughness=0.03,
+        ior=1.45,
+        transmission_weight=1.0,
+        thin_wall=True,
+        specular=0.5,
+        description=(
+            "A molecular surface as thin glass: it refracts what is inside it "
+            "and can focus light onto it. Needs Cycles, transmission bounces "
+            "and, for the caustics to survive, `enable_caustics`."
         ),
     ),
     "metal": GalaMaterialSpec(
@@ -358,11 +390,25 @@ def build_material(
     _set_input(principled, ("Emission Strength",), spec.emission_strength)
     _set_input(principled, ("Emission Color", "Emission"), spec.emission_color)
     _set_input(principled, ("Alpha",), spec.alpha)
+    _set_input(
+        principled, ("Transmission Weight", "Transmission"), spec.transmission_weight
+    )
+    _set_input(principled, ("Thin Wall", "Thin Film"), spec.thin_wall)
 
     colour_socket = None
     alpha_socket = None
     if spec.use_attribute_color:
         colour_socket, alpha_socket = _colour_input(tree, (-350, 100))
+
+    if colour_socket is not None and spec.color_mix < 1.0:
+        tint = tree.nodes.new("ShaderNodeMix")
+        tint.data_type = "RGBA"
+        tint.location = (-180, 100)
+        tint.inputs["Factor"].default_value = spec.color_mix
+        inputs = [socket for socket in tint.inputs if socket.type == "RGBA"]
+        inputs[0].default_value = spec.base_color
+        tree.links.new(colour_socket, inputs[1])
+        colour_socket = next(s for s in tint.outputs if s.type == "RGBA")
 
     if spec.ao_strength > 0.0:
         ao = tree.nodes.new("ShaderNodeAmbientOcclusion")
