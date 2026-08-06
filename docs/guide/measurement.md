@@ -126,6 +126,11 @@ gala.label_atoms(mol, "resn ZN", template="{elem}")
 label legible over a busy molecular surface. The card is parented to the text
 and billboards with it.
 
+Distances and measured values get a translucent pill behind them for the same
+reason, in a cooler tint and a different outline from the residue cards, so the
+two kinds of label are distinguishable at a glance. Pass `label_card=False` to
+`draw_interactions` or `draw_measurement` for bare text.
+
 Billboarding copies the camera's rotation rather than tracking it, so every
 label is level with the frame and parallel to every other. Tracking would aim
 each label at the camera and then roll it towards world +Y, which tips labels

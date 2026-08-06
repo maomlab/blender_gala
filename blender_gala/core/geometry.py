@@ -12,6 +12,7 @@ into data blocks.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -30,6 +31,7 @@ __all__ = [
     "billboard",
     "dash_segments",
     "dihedral_arc_points",
+    "make_card",
     "make_curve",
     "make_line",
     "make_text",
@@ -477,3 +479,139 @@ def billboard(obj: Any, camera: Any = None) -> Any:
     constraint = obj.constraints.new("COPY_ROTATION")
     constraint.target = camera
     return obj
+
+
+def rounded_rectangle(
+    half_width: float,
+    half_height: float,
+    corner: float = 0.35,
+    segments: int = 6,
+) -> list[tuple[float, float, float]]:
+    """Return the outline of a rectangle with rounded corners, anticlockwise.
+
+    Parameters
+    ----------
+    half_width, half_height : float
+        Half extents in local X and Y.
+    corner : float
+        Corner radius as a fraction of the shorter half extent. ``0`` is a
+        plain rectangle and ``1`` a pill — a full semicircle at each end.
+    segments : int
+        Straight segments per corner arc.
+
+    Returns
+    -------
+    list of tuple
+        Vertices in local space, at z = 0.
+    """
+    radius = max(0.0, min(corner, 1.0)) * min(half_width, half_height)
+    if radius <= 0.0:
+        return [
+            (-half_width, -half_height, 0.0),
+            (half_width, -half_height, 0.0),
+            (half_width, half_height, 0.0),
+            (-half_width, half_height, 0.0),
+        ]
+
+    inner_x = half_width - radius
+    inner_y = half_height - radius
+    points: list[tuple[float, float, float]] = []
+    for centre_x, centre_y, start in (
+        (inner_x, -inner_y, -math.pi / 2),
+        (inner_x, inner_y, 0.0),
+        (-inner_x, inner_y, math.pi / 2),
+        (-inner_x, -inner_y, math.pi),
+    ):
+        for step in range(segments + 1):
+            angle = start + (math.pi / 2) * (step / segments)
+            points.append(
+                (
+                    centre_x + radius * math.cos(angle),
+                    centre_y + radius * math.sin(angle),
+                    0.0,
+                )
+            )
+    return points
+
+
+#: Backing for a number sitting over a molecule — an interaction's distance or
+#: a measurement's value. Cool, dark and see-through, against the residue
+#: cards' neutral near-black, and used with a pill shape: different tint and
+#: different outline, so which kind of label you are looking at needs no
+#: thought. White text on a pale molecule is otherwise unreadable.
+LABEL_CARD_COLOUR = (0.02, 0.07, 0.12, 0.62)
+
+
+def make_card(
+    text_object: Any,
+    colour: tuple[float, float, float, float],
+    padding: float = 0.35,
+    corner: float = 0.35,
+    collection: str = gala_collections.LABELS,
+    gala_type: str = "label_card",
+    material_name: str = "GALA Label Card",
+) -> Any | None:
+    """Create a translucent rounded plane sized to sit behind a text object.
+
+    Parameters
+    ----------
+    text_object : bpy.types.Object
+        The ``FONT`` object to back. The card is parented to it, so it inherits
+        the billboard constraint and stays behind the glyphs from any angle.
+    colour : tuple of float
+        Card RGBA. The alpha is what makes it a tint over the scene rather
+        than a hole in it.
+    padding : float
+        Extra size around the text, as a fraction of its dimensions.
+    corner : float
+        Corner rounding, ``0`` square through ``1`` for a pill. See
+        :func:`rounded_rectangle`.
+    collection : str
+        Gala collection to link into — the label's own, so that clearing that
+        category takes its cards with it.
+    gala_type : str
+        Tag to apply.
+    material_name : str
+        Name for the card material.
+
+    Returns
+    -------
+    bpy.types.Object or None
+        ``None`` when the text has no dimensions to measure yet.
+    """
+    bpy_mod = _require_bpy()
+    from ..scene import materials as gala_materials
+
+    # Text dimensions are only valid once the depsgraph has evaluated the font.
+    bpy_mod.context.view_layer.update()
+    width, height, _ = text_object.dimensions
+    if width <= 0 or height <= 0:
+        return None
+
+    half_w = width * (0.5 + padding)
+    half_h = height * (0.5 + padding * 2.0)
+    points = rounded_rectangle(half_w, half_h, corner)
+
+    mesh = bpy_mod.data.meshes.new(f"{text_object.name} card")
+    mesh.from_pydata(points, [], [list(range(len(points)))])
+    mesh.update()
+
+    card = bpy_mod.data.objects.new(f"{text_object.name} card", mesh)
+    # Behind the text along the label's local -Z.
+    card.location = (0.0, 0.0, -max(width, height) * 0.01)
+    card.parent = text_object
+
+    material = gala_materials.build_material(
+        gala_materials.MATERIAL_PRESETS["label"].with_(
+            base_color=colour,
+            emission_strength=0.0,
+            alpha=colour[3],
+            use_attribute_color=False,
+        ),
+        name=material_name,
+    )
+    mesh.materials.append(material)
+
+    gala_collections.link_object(card, collection)
+    gala_collections.tag(card, gala_type)
+    return card

@@ -234,7 +234,20 @@ def test_interaction_labels_are_optional(site_molecule):
     found = detect.hydrogen_bonds(structure)
 
     assert len(draw.draw_interactions(found, target=structure, label=False)) == 1
-    assert len(draw.draw_interactions(found, target=structure, label=True)) == 2
+    assert (
+        len(
+            draw.draw_interactions(
+                found, target=structure, label=True, label_card=False
+            )
+        )
+        == 2
+    ), "the line and its text"
+
+    created = draw.draw_interactions(found, target=structure, label=True)
+    assert len(created) == 3, "the line, its text and the pill behind it"
+    card = created[-1]
+    assert card.parent is created[-2], "the card rides with the text it backs"
+    assert len(card.data.vertices) > 4, "rounded, not a plain quad"
 
 
 @requires_mn
@@ -264,12 +277,15 @@ def test_distance_draws_a_line_and_a_label(site_molecule):
     result = measurements.distance(
         site_molecule, "resi 1 and name OG", "resi 2 and name OD1", draw=True
     )
-    assert len(result.objects) == 2
+    assert len(result.objects) == 3, "the line, its value and the pill behind it"
     kinds = {obj.get("gala_type") for obj in result.objects}
     assert kinds == {"measurement_distance", "measurement_label_distance"}
 
     label = next(o for o in result.objects if o.type == "FONT")
     assert label.data.body == "2.80 A"
+
+    card = next(o for o in result.objects if o.type == "MESH" and o.parent is label)
+    assert len(card.data.vertices) > 4, "rounded, not a plain quad"
 
 
 @requires_mn
@@ -315,7 +331,7 @@ def test_clear_measurements(site_molecule):
     measurements.distance(
         site_molecule, "resi 1 and name OG", "resi 2 and name OD1", draw=True
     )
-    assert draw.clear_measurements() == 2
+    assert draw.clear_measurements() == 3, "line, value and card go together"
 
 
 # ---------------------------------------------------------------------------

@@ -88,6 +88,7 @@ def draw_interactions(
     target: Any = None,
     styles: dict[str, InteractionStyle] | None = None,
     label: bool | None = None,
+    label_card: bool = True,
     label_template: str = "{distance:.1f}",
     label_size: float = 1.2,
     name_prefix: str = "GALA",
@@ -108,6 +109,9 @@ def draw_interactions(
         :data:`INTERACTION_STYLES`.
     label : bool, optional
         Force distance labels on or off. ``None`` uses each style's default.
+    label_card : bool, optional
+        Put a translucent pill behind each distance label. On by default: the
+        text is white, and white on a pale molecule is unreadable.
     label_template : str, optional
         ``str.format`` template with ``distance``, ``angle``, ``kind`` and
         ``label`` available.
@@ -184,6 +188,23 @@ def draw_interactions(
         )
         geometry.billboard(text_object)
         created.append(text_object)
+
+        # A pill behind the number. White text on a pale protein is unreadable,
+        # and a distance is the one label that has to be legible or it is just
+        # decoration. Pill-shaped and cooler than the residue cards, so the two
+        # kinds of label are told apart at a glance rather than read.
+        if label_card:
+            card = geometry.make_card(
+                text_object,
+                geometry.LABEL_CARD_COLOUR,
+                padding=0.3,
+                corner=1.0,
+                collection=gala_collections.INTERACTIONS,
+                gala_type=f"interaction_label_{interaction.kind}",
+                material_name="GALA Interaction Label Card",
+            )
+            if card is not None:
+                created.append(card)
 
     return created
 

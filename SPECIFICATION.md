@@ -302,12 +302,18 @@ line it draws — dashed or solid — so a hydrogen bond behaves like any other
 scene object.
 
 **D-16. Text labels get both treatments.** `label_3d()` creates a real `FONT`
-object ("in-scene card", optionally with a rounded backing plane and a
+object ("in-scene card", optionally with a rounded backing plane — actually
+rounded, since D-16 claimed it long before the geometry did — and a
 `COPY_ROTATION` billboard constraint — not `TRACK_TO`, which aims each label at
 the camera and then rolls it towards world +Y, so labels in different places
 come out tipped by different amounts). `label_hud()` registers an MN annotation so
 the label is a resolution-independent 2D overlay for compositing. The objective
 asked for both; they solve different problems.
+
+Values — an interaction's distance, a measurement's number — get a backing too,
+as a pill rather than a rounded rectangle and in a cooler tint. White text over
+a pale molecule is unreadable without one, and the different outline says which
+kind of label it is without anyone having to read it.
 
 **D-17. Everything Gala creates lives under a `Gala` collection**, sub-divided
 into `Gala/Interactions`, `Gala/Measurements`, `Gala/Labels`, `Gala/Lighting`.

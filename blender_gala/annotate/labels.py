@@ -167,7 +167,7 @@ def label(
         created.append(obj)
 
         if style == "card":
-            card = _make_card(obj, card_colour, padding=0.35)
+            card = geometry.make_card(obj, card_colour, padding=0.35, corner=0.35)
             if card is not None:
                 created.append(card)
 
@@ -228,58 +228,6 @@ def _label_entries(
         )
         entries.append((body, position))
     return entries
-
-
-def _make_card(
-    text_object: Any,
-    colour: tuple[float, float, float, float],
-    padding: float = 0.35,
-) -> Any | None:
-    """Create a translucent plane sized to sit behind a text object."""
-    bpy_mod = _require_bpy()
-
-    # Text dimensions are only valid once the depsgraph has evaluated the font.
-    bpy_mod.context.view_layer.update()
-    width, height, _ = text_object.dimensions
-    if width <= 0 or height <= 0:
-        return None
-
-    half_w = width * (0.5 + padding)
-    half_h = height * (0.5 + padding * 2.0)
-
-    mesh = bpy_mod.data.meshes.new(f"{text_object.name} card")
-    mesh.from_pydata(
-        [
-            (-half_w, -half_h, 0.0),
-            (half_w, -half_h, 0.0),
-            (half_w, half_h, 0.0),
-            (-half_w, half_h, 0.0),
-        ],
-        [],
-        [(0, 1, 2, 3)],
-    )
-    mesh.update()
-
-    card = bpy_mod.data.objects.new(f"{text_object.name} card", mesh)
-    # Behind the text along the label's local -Z, so the billboard constraint
-    # keeps the card behind the glyphs from every angle.
-    card.location = (0.0, 0.0, -max(width, height) * 0.01)
-    card.parent = text_object
-
-    material = gala_materials.build_material(
-        gala_materials.MATERIAL_PRESETS["label"].with_(
-            base_color=colour,
-            emission_strength=0.0,
-            alpha=colour[3],
-            use_attribute_color=False,
-        ),
-        name="GALA Label Card",
-    )
-    mesh.materials.append(material)
-
-    gala_collections.link_object(card, gala_collections.LABELS)
-    gala_collections.tag(card, "label_card")
-    return card
 
 
 def label_residues(

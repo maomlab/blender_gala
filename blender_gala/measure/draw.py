@@ -36,6 +36,7 @@ def draw_measurement(
     label_template: str | None = None,
     label_size: float = 1.5,
     label_offset: float = 0.5,
+    label_card: bool = True,
     arc: bool = True,
     scale: float | None = None,
 ) -> list[Any]:
@@ -65,6 +66,9 @@ def draw_measurement(
         available. Defaults to the formatted value, e.g. ``"2.85 A"``.
     label_size : float, optional
         Text size in ångström.
+    label_card : bool, optional
+        Put a translucent pill behind the value, so white text stays readable
+        over a pale molecule.
     label_offset : float, optional
         How far to lift the label off the line, in ångström.
     arc : bool, optional
@@ -163,6 +167,19 @@ def draw_measurement(
         )
         geometry.billboard(text_object)
         created.append(text_object)
+
+        if label_card:
+            card = geometry.make_card(
+                text_object,
+                geometry.LABEL_CARD_COLOUR,
+                padding=0.3,
+                corner=1.0,
+                collection=gala_collections.MEASUREMENTS,
+                gala_type=f"measurement_label_{measurement.kind}",
+                material_name="GALA Measurement Label Card",
+            )
+            if card is not None:
+                created.append(card)
 
     return created
 
