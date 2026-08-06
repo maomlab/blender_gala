@@ -48,6 +48,28 @@ heading("2. Style: cartoon protein, ball-and-stick ligand and pocket")
 mol.add_style("cartoon", selection="is_peptide")
 mol.add_style("ball_and_stick", selection="is_hetero")
 
+# A cool neutral protein and a warm ligand, so the eye goes to the ligand
+# without anything having to point at it. Complementary hues an octave apart in
+# brightness do that work by themselves; Molecular Nodes' default gives protein
+# and ligand the same pink and leaves them competing.
+#
+# Ordered general to specific, because later entries win where selections
+# overlap: everything cool, then the ligand's carbons warm, then its
+# heteroatoms back to the CPK colours a chemist reads without a legend.
+SLATE = "#93a6b8"
+AMBER = "#ffaf3a"
+
+gala.color_by_selection(
+    mol,
+    {
+        "all": SLATE,
+        f"({LIGAND}) and elem C": AMBER,
+        f"({LIGAND}) and elem N": "#3050f8",
+        f"({LIGAND}) and elem O": "#ff2010",
+        f"({LIGAND}) and elem S": "#ffd030",
+    },
+)
+
 gala.publication_setup(
     mol,
     preset=QUALITY,

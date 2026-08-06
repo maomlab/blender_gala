@@ -33,7 +33,8 @@ report it returns.
 
 `02_binding_site.py` — find every interaction between a ligand and its pocket,
 draw them as dashed lines, quote the polar distances, and label the closest
-residues on translucent cards. The camera looks in along the direction the
+residues on translucent cards. A cool neutral protein against warm ligand
+carbons, so the eye goes where the figure is about. The camera looks in along the direction the
 pocket opens, computed from the structure, and frames the site rather than the
 protein. The full Objective 2 workflow.
 
