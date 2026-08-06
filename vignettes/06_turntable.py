@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _common import IMAGE_DIR, QUALITY, heading, load_structure, render, setup
+from _common import QUALITY, heading, load_structure, setup
 
 mn, gala = setup()
 
@@ -137,18 +137,16 @@ rig.rotation_euler.z = math.radians(20)
 # ---------------------------------------------------------------------------
 heading("5. Check a few frames")
 # ---------------------------------------------------------------------------
-# Rendering 120 frames in CI would be wasteful, so sample a few stills.
-os.makedirs(IMAGE_DIR, exist_ok=True)
+# Where the camera is at a few points around the turn, which is what there is
+# to check about an orbit. No still is rendered: the figure this vignette
+# contributes is the animation below, and a frozen frame of a turntable was
+# only ever a stand-in for it.
 for frame in (1, FRAMES // 4, FRAMES // 2):
     scene.frame_set(frame)
     location = tuple(round(v, 3) for v in scene.camera.matrix_world.translation)
     print(f"  frame {frame:3d}: camera at {location}")
 
 scene.frame_set(1)
-render(gala, "06_turntable")
-
-print("\n  To render the whole animation:")
-print("      gala.scene.render('frames/turntable_', animation=True)")
 
 
 # ---------------------------------------------------------------------------
