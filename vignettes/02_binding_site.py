@@ -128,6 +128,32 @@ drawn += gala.draw_interactions(
 )
 print(f"  created {len(drawn)} objects in the Gala Interactions collection")
 
+# The residues that actually make those contacts, as ball-and-stick, so the
+# dashes land on atoms rather than stopping against a ribbon. Half the ligand's
+# radii and in the protein's slate, so they read as what the ligand is touching
+# rather than competing with it.
+#
+# `color=None` matters: the default inserts a colour node that would overwrite
+# the scheme set in step 2, and materials are reassigned because a style added
+# after `publication_setup` has not been through it.
+contact_atoms = np.zeros(structure.n_atoms, dtype=bool)
+for contact in contacts:
+    contact_atoms[list(contact.atoms_b)] = True
+
+residue_keys = structure.context.residue_key
+contact_residues = np.unique(residue_keys[contact_atoms])
+contact_atoms = np.isin(residue_keys, contact_residues)
+
+attribute = mol.object.data.attributes.new("contacts", "BOOLEAN", "POINT")
+attribute.data.foreach_set("value", contact_atoms.tolist())
+mol.add_style(
+    mn.StyleBallAndStick(sphere_radius=0.15, bond_radius=0.12),
+    selection="contacts",
+    color=None,
+)
+gala.assign_materials(mol, scheme="chemistry")
+print(f"  {len(contact_residues)} contacting residues drawn as thin sticks")
+
 # Restyle one kind. Distances are in angstrom throughout.
 from blender_gala import InteractionStyle
 
