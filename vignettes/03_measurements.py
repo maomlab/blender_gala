@@ -47,11 +47,11 @@ COOL_HEX, WARM_HEX = "#93a6b8", "#ffab3d"
 COOL = (0.45, 0.62, 0.82)
 WARM = (1.0, 0.671, 0.239)
 
-# Chosen by casting rays at the measured span from a grid of viewpoints and
-# keeping the one that leaves most of it unobstructed: from behind and a
-# little below the membrane plane. A default three-quarter view puts two
-# helices between the camera and the only 4.9 A that matter.
-VIEWPOINT = (-180.0, -30.0)
+# Straight on, in the membrane plane, which with the frame built below puts
+# the helices vertical and the TM6-TM2 gap across the frame. Casting rays at
+# the measured span from a grid of angles says a 15 degree tilt would leave a
+# little more of it visible; not enough to lean the receptor over for.
+VIEWPOINT = (0.0, 0.0)
 
 # Class A thresholds, the paper's Table 3.
 INTERMEDIATE_FROM = 13.60
@@ -159,13 +159,16 @@ def atom_position(structure: AtomStructure, selection: str) -> np.ndarray:
     return structure.world_positions()[structure.select(selection)][0]
 
 
-def stand_upright(molecules, reference: AtomStructure, swing: np.ndarray) -> None:
-    """Rotate everything so the helix bundle is vertical and the swing is across.
+def stand_upright(molecules, reference: AtomStructure) -> None:
+    """Rotate everything into the orientation the paper draws the receptor in.
 
-    A crystal frame is arbitrary, and seen down the bundle axis a 5 A
-    displacement projects to almost nothing. This puts the membrane normal up
-    the frame and the direction TM6 moves in across it, which is the view the
-    measurement is about.
+    Figure 2A of Aranda-García et al. is a side view in the membrane plane:
+    the transmembrane helices run up the frame, TM6 on the left and TM2 on the
+    right, so the gap between them opens across the page. A crystal frame is
+    arbitrary, and seen down the bundle axis a 5 A displacement projects to
+    almost nothing, so the frame is built rather than guessed -- membrane
+    normal to ``+Z``, TM6-to-TM2 to ``+X``, which the camera then looks at
+    head on from ``-Y``.
     """
     import bpy
     import mathutils
@@ -180,7 +183,11 @@ def stand_upright(molecules, reference: AtomStructure, swing: np.ndarray) -> Non
     intracellular = atom_position(reference, TM2) + atom_position(reference, TM6)
     if np.dot(intracellular / 2 - centre, up) > 0:
         up = -up
-    across = swing - np.dot(swing, up) * up
+    # Only the part of TM6-to-TM2 that lies in the membrane plane: the two
+    # alpha carbons are at slightly different depths, and tilting the bundle
+    # to square that up would be tilting it for nothing.
+    across = atom_position(reference, TM2) - atom_position(reference, TM6)
+    across = across - np.dot(across, up) * up
     across /= np.linalg.norm(across)
     rotation = np.array([across, np.cross(up, across), up])
 
@@ -194,11 +201,7 @@ def stand_upright(molecules, reference: AtomStructure, swing: np.ndarray) -> Non
     bpy.context.view_layer.update()
 
 
-stand_upright(
-    (closed, opened),
-    closed_structure,
-    atom_position(opened_structure, TM6) - atom_position(closed_structure, TM6),
-)
+stand_upright((closed, opened), closed_structure)
 
 
 # ---------------------------------------------------------------------------
