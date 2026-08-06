@@ -105,6 +105,19 @@ venv: ## Create .venv and install the toolchain into it (recommended)
 	@echo
 	@echo "Done. make docs, lint, typecheck and ui-shots will now use $(VENV_PYTHON)."
 
+# The wheel drops the APBS binary inside the package rather than in bin/, and
+# it needs its own lib/ on the loader path, so this writes a wrapper instead of
+# symlinking. `GALA_APBS` would do as well; a wrapper means `apbs` also works
+# from an activated shell.
+.PHONY: apbs
+apbs: ## Install APBS and PDB2PQR into .venv, for the electrostatics vignette
+	$(VENV_PYTHON) -m pip install --upgrade -e ".[apbs]"
+	@bin=$$($(VENV_PYTHON) -c "import apbs_binary, os; print(os.path.dirname(apbs_binary.__file__))"); \
+	  printf '#!/bin/sh\nexport DYLD_LIBRARY_PATH="%s/lib:$$DYLD_LIBRARY_PATH"\nexport LD_LIBRARY_PATH="%s/lib:$$LD_LIBRARY_PATH"\nexec "%s/bin/apbs" "$$@"\n' "$$bin" "$$bin" "$$bin" > $(VENV)/bin/apbs; \
+	  chmod +x $(VENV)/bin/apbs
+	@echo "  apbs   -> $$($(VENV)/bin/apbs --version 2>&1 | head -1)"
+	@echo "  pdb2pqr installed; make vignettes will find both."
+
 .PHONY: dev-deps
 dev-deps: check-blender ## Install pytest into .blender-deps for Blender's Python
 	$(BLENDER_RUN) --python scripts/install_deps.py
@@ -187,7 +200,8 @@ docs-serve: check-mkdocs ## Serve the documentation with live reload
 vignettes: check-blender ## Run every vignette and render its images
 	@for script in vignettes/[0-9]*.py; do \
 	  echo "=== $$script"; \
-	  $(BLENDER) --background --python "$$script" || exit 1; \
+	  PATH="$(CURDIR)/$(VENV)/bin:$$PATH" $(BLENDER) --background --python "$$script" \
+	    || exit 1; \
 	done
 
 # Renders the orbit frame by frame and assembles them. Kept out of

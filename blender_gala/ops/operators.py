@@ -21,6 +21,8 @@ from ..core import mn as mn_bridge
 from ..core.entity import AtomStructure
 from ..core.exceptions import GalaError
 from ..core.registration import register_classes, unregister_classes
+from ..electrostatics import grid as gala_grid
+from ..electrostatics import surface as electrostatics
 from ..interactions import detect
 from ..interactions import draw as interaction_draw
 from ..measure import draw as measure_draw
@@ -502,6 +504,45 @@ class GALA_OT_color(_GalaOperator):
         return {"FINISHED"}
 
 
+class GALA_OT_electrostatic_surface(_GalaOperator):
+    """Solve the Poisson-Boltzmann equation and paint it on the surface"""
+
+    bl_idname = "gala.electrostatic_surface"
+    bl_label = "Electrostatic Surface"
+
+    def run(self, context, structure):
+        props = context.scene.gala
+
+        path = bpy.path.abspath(props.apbs_map) if props.apbs_map else ""
+        grid = gala_grid.read_dx(path) if path else None
+
+        # APBS is seconds on a small protein and minutes on a large one, and
+        # it is a subprocess either way: the wait cursor is the only signal
+        # the window can give while it runs.
+        context.window.cursor_set("WAIT")
+        try:
+            result = electrostatics.electrostatic_surface(
+                structure,
+                grid=grid,
+                ramp=props.apbs_ramp,
+                alpha=props.apbs_alpha,
+                forcefield=props.apbs_forcefield,
+                solver=props.apbs_solver,
+                ionic_strength=props.apbs_ionic_strength,
+            )
+        finally:
+            context.window.cursor_set("DEFAULT")
+
+        surface_values = result.potential[np.isfinite(result.potential)]
+        self.report(
+            {"INFO"},
+            f"Surface potential {surface_values.min():+.1f} to "
+            f"{surface_values.max():+.1f} kT/e over {surface_values.size} atoms; "
+            f"ramp +/-{result.ramp:g}.",
+        )
+        return {"FINISHED"}
+
+
 # ---------------------------------------------------------------------------
 # Housekeeping
 # ---------------------------------------------------------------------------
@@ -553,6 +594,7 @@ classes = (
     GALA_OT_label,
     GALA_OT_clear_labels,
     GALA_OT_color,
+    GALA_OT_electrostatic_surface,
     GALA_OT_clear_all,
     GALA_OT_render,
 )

@@ -24,6 +24,9 @@ Quick start
     gala.label(mol, "byres (protein within 4 of ligand)")
     gala.color_by_plddt(mol)
 
+    # APBS electrostatics, painted onto a translucent surface.
+    gala.electrostatic_surface(mol, ramp=5.0)
+
 Selections use PyMOL syntax throughout, so ``"byres (protein within 4 of
 ligand)"`` means what you would expect.
 
@@ -38,7 +41,7 @@ import os
 import tomllib
 
 # --- subpackages -----------------------------------------------------------
-from . import annotate, color, core, interactions, measure, scene
+from . import annotate, color, core, electrostatics, interactions, measure, scene
 from .annotate import (
     clear_labels,
     label,
@@ -70,6 +73,14 @@ from .core import (
     compile_selection,
     select,
     select_indices,
+)
+from .electrostatics import (
+    PotentialGrid,
+    color_by_potential,
+    electrostatic_surface,
+    potential_at_atoms,
+    read_dx,
+    run_apbs,
 )
 from .interactions import (
     INTERACTION_KINDS,
@@ -138,6 +149,7 @@ __all__ = [
     "InteractionStyle",
     "Measurement",
     "MolecularNodesUnavailable",
+    "PotentialGrid",
     "Selection",
     "SelectionSyntaxError",
     "StructureError",
@@ -155,6 +167,7 @@ __all__ = [
     "color_by_attribute",
     "color_by_bfactor",
     "color_by_plddt",
+    "color_by_potential",
     "color_by_selection",
     "color_from_csv",
     "compile_selection",
@@ -164,6 +177,8 @@ __all__ = [
     "dihedral",
     "distance",
     "draw_interactions",
+    "electrostatic_surface",
+    "electrostatics",
     "enable_passes",
     "find_interactions",
     "frame_target",
@@ -183,10 +198,13 @@ __all__ = [
     "pi_stacking",
     "plddt_legend",
     "polar_contacts",
+    "potential_at_atoms",
     "publication_setup",
     "read_colors",
+    "read_dx",
     "register",
     "render",
+    "run_apbs",
     "salt_bridges",
     "scene",
     "select",

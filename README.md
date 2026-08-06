@@ -75,6 +75,12 @@ it" to "render this and put it in a paper":
 - **Labels.** In-scene 3D text (optionally on a translucent card, optionally
   billboarded) *and* 2D compositing overlays via Molecular Nodes' annotation
   system. They solve different problems, so both are here.
+- **Electrostatics.** [APBS](https://www.poissonboltzmann.org) run through
+  PDB2PQR and painted onto a translucent molecular surface, the way the PyMOL
+  APBS plugin does it — sampled where the surface actually is rather than at
+  the atom centres, with buried atoms left uncoloured. Reads an existing
+  OpenDX map too.
+
 - **Data-driven colour.** AlphaFold pLDDT with the official confidence bands,
   B-factors, or any per-residue value from an array, a dict or a CSV, through
   colormaps implemented natively (no matplotlib inside Blender).

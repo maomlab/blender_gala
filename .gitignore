@@ -28,3 +28,6 @@ docs/images/passes/
 *~
 .vscode/
 .idea/
+
+# APBS writes its MC-shell capture file into whatever directory it runs in.
+io.mc

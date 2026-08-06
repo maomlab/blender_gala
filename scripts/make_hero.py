@@ -55,6 +55,11 @@ CAPABILITIES = [
         "Animation",
         "Turntables and orbits, rendered frame by frame",
     ),
+    (
+        "07_electrostatics.png",
+        "Electrostatics",
+        "APBS potential, painted on a translucent surface",
+    ),
 ]
 
 # --- Geometry, in pixels of the finished image ----------------------------

@@ -234,6 +234,29 @@ class GALA_PT_color(_GalaPanel):
         layout.operator("gala.color", icon="COLOR")
 
 
+class GALA_PT_electrostatics(_GalaPanel):
+    bl_idname = "GALA_PT_electrostatics"
+    bl_label = "Electrostatics"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.gala
+
+        column = layout.column(align=True)
+        column.prop(props, "apbs_map")
+        if not props.apbs_map:
+            column.prop(props, "apbs_forcefield")
+            column.prop(props, "apbs_solver")
+            column.prop(props, "apbs_ionic_strength")
+
+        column = layout.column(align=True)
+        column.prop(props, "apbs_ramp")
+        column.prop(props, "apbs_alpha")
+
+        layout.operator("gala.electrostatic_surface", icon="OUTLINER_OB_FORCE_FIELD")
+
+
 class GALA_PT_cleanup(_GalaPanel):
     bl_idname = "GALA_PT_cleanup"
     bl_label = "Clean Up"
@@ -253,6 +276,7 @@ classes = (
     GALA_PT_measure,
     GALA_PT_label,
     GALA_PT_color,
+    GALA_PT_electrostatics,
     GALA_PT_cleanup,
 )
 

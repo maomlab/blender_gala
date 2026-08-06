@@ -276,6 +276,55 @@ class GalaSceneProperties(PropertyGroup):
     csv_resid_column: StringProperty(name="Residue Column", default="res_id")
     csv_chain_column: StringProperty(name="Chain Column", default="")
 
+    # -- electrostatics ---------------------------------------------------
+    apbs_map: StringProperty(
+        name="Map",
+        subtype="FILE_PATH",
+        default="",
+        description="An OpenDX potential map. Leave empty to run APBS",
+    )
+    apbs_forcefield: EnumProperty(
+        name="Force Field",
+        items=[
+            ("AMBER", "AMBER", "AMBER charges and radii"),
+            ("PARSE", "PARSE", "PARSE, tuned for solvation energies"),
+            ("CHARMM", "CHARMM", "CHARMM charges and radii"),
+            ("PEOEPB", "PEOEPB", "PEOE_PB charges"),
+            ("SWANSON", "SWANSON", "Swanson et al. charges"),
+            ("TYL06", "TYL06", "Tan, Yang and Luo charges"),
+        ],
+        default="AMBER",
+    )
+    apbs_solver: EnumProperty(
+        name="Solver",
+        items=[
+            ("lpbe", "Linearised", "Linearised Poisson-Boltzmann; the usual choice"),
+            ("npbe", "Non-linear", "Full equation; for strongly charged solutes"),
+        ],
+        default="lpbe",
+    )
+    apbs_ionic_strength: FloatProperty(
+        name="Salt (M)",
+        default=0.15,
+        min=0.0,
+        soft_max=1.0,
+        description="Monovalent salt concentration in the solvent",
+    )
+    apbs_ramp: FloatProperty(
+        name="Ramp (kT/e)",
+        default=5.0,
+        min=0.1,
+        soft_max=25.0,
+        description="Where the colour ramp saturates, either side of zero",
+    )
+    apbs_alpha: FloatProperty(
+        name="Opacity",
+        default=0.6,
+        min=0.05,
+        max=1.0,
+        description="Surface opacity; below 1 lets what is inside show through",
+    )
+
 
 classes = (GalaSceneProperties,)
 
