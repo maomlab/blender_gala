@@ -67,7 +67,15 @@ after the render.
 
 ## 6. A turntable
 
-![06_turntable](images/06_turntable.png)
+![06_turntable](images/06_turntable.webp)
 
 `06_turntable.py` — an orbiting animation with framing that holds for every
-frame.
+frame. The camera is parented to a pivot at the molecule's centre and the
+lights are not, so the structure turns *through* the light rather than being lit
+identically from every angle, which is what makes its shape read.
+
+The animation above is the turn itself — 60 frames at 25 fps, in WebP rather
+than GIF so that it keeps a real alpha channel and the full colour range at a
+fraction of the size. It is built by `make turntable`, which is not part of
+`make vignettes`: a hundred-odd Cycles frames is more than a smoke test on
+every push should be doing.

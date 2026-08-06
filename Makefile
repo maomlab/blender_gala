@@ -11,6 +11,7 @@ SHELL := /bin/bash
 PACKAGE   := blender_gala
 DIST      := dist
 DEPS_DIR  := .blender-deps
+TURNTABLE_DIR := build/turntable
 
 # Read by hand rather than with tomllib: this runs on every invocation of make,
 # including `make help`, and tomllib needs Python 3.11. Reading it with an
@@ -188,6 +189,18 @@ vignettes: check-blender ## Run every vignette and render its images
 	  echo "=== $$script"; \
 	  $(BLENDER) --background --python "$$script" || exit 1; \
 	done
+
+# Renders the orbit frame by frame and assembles them. Kept out of
+# `vignettes` because it is a hundred-odd Cycles frames, which is not what a
+# smoke test on every push is for.
+.PHONY: turntable
+turntable: check-blender ## Render the turntable animation into docs/images
+	@rm -rf $(TURNTABLE_DIR) && mkdir -p $(TURNTABLE_DIR)
+	GALA_TURNTABLE_DIR=$(TURNTABLE_DIR) $(BLENDER) --background \
+	  --python vignettes/06_turntable.py
+	$(PYTHON) scripts/make_animation.py $(TURNTABLE_DIR) \
+	  docs/images/06_turntable.webp
+	@echo "  frames kept in $(TURNTABLE_DIR) for re-encoding; make clean removes them"
 
 .PHONY: ui-shots
 ui-shots: check-blender ## Recapture the sidebar screenshots in docs/images/ui

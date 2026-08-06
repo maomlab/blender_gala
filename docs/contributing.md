@@ -83,6 +83,11 @@ checks the output is unchanged.
 ## Documentation images
 
 The rendered figures in [Vignettes](vignettes.md) come from `make vignettes`.
+The turntable animation on that page comes from `make turntable`, which renders
+every second frame of the orbit and assembles them into an animated WebP —
+kept out of `make vignettes`, and out of CI, because a hundred-odd Cycles
+frames is not what a smoke test on every push is for. The frames stay in
+`build/turntable` so the encode can be retried without re-rendering.
 The panel screenshots in [The Blender UI](guide/ui.md) come from:
 
 ```bash
