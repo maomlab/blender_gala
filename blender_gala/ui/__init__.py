@@ -1,19 +1,21 @@
-"""Blender user interface: scene properties and sidebar panels."""
+"""Blender user interface: scene properties, sidebar panels and File menus."""
 
 from __future__ import annotations
 
-from . import panels, properties
+from . import menus, panels, properties
 
-__all__ = ["panels", "properties", "register", "unregister"]
+__all__ = ["menus", "panels", "properties", "register", "unregister"]
 
 
 def register() -> None:
-    """Register the property group and panels."""
+    """Register the property group, panels and File menu entries."""
     properties.register()
     panels.register()
+    menus.register()
 
 
 def unregister() -> None:
-    """Unregister the panels and property group."""
+    """Unregister them again, in the reverse order."""
+    menus.unregister()
     panels.unregister()
     properties.unregister()

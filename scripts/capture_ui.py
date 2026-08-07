@@ -101,6 +101,7 @@ SHOTS = (
     Shot("label", expand=("GALA_PT_label",)),
     Shot("colour", expand=("GALA_PT_color",)),
     Shot("colour-csv", expand=("GALA_PT_color",), props={"color_mode": "csv"}),
+    Shot("pymol", expand=("GALA_PT_pymol",)),
 )
 
 SHOTS_BY_NAME = {shot.name: shot for shot in SHOTS}
