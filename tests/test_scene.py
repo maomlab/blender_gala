@@ -434,6 +434,57 @@ def test_colour_mix_dilutes_the_attribute_colour():
     assert colours[1].is_linked and not colours[0].is_linked
 
 
+def test_glass_subsurface_mixes_two_shaders():
+    """Not a Principled material: a scattering body and a glass shell, mixed,
+    with the per-atom colour driving the body."""
+    from blender_gala.scene import materials
+
+    material = materials.build_glass_subsurface(
+        name="GALA Test Body", mix=0.4, glass_ior=0.2, glass_roughness=0.2
+    )
+    nodes = {node.bl_idname for node in material.node_tree.nodes}
+    assert "ShaderNodeMixShader" in nodes
+    assert "ShaderNodeSubsurfaceScattering" in nodes
+    assert "ShaderNodeBsdfGlass" in nodes
+
+    mixer = next(
+        n for n in material.node_tree.nodes if n.bl_idname == "ShaderNodeMixShader"
+    )
+    assert mixer.inputs["Fac"].default_value == pytest.approx(0.4)
+    assert mixer.outputs["Shader"].is_linked
+
+    glass = next(
+        n for n in material.node_tree.nodes if n.bl_idname == "ShaderNodeBsdfGlass"
+    )
+    assert glass.inputs["IOR"].default_value == pytest.approx(0.2)
+    assert glass.distribution == "BECKMANN"
+
+    subsurface = next(
+        n
+        for n in material.node_tree.nodes
+        if n.bl_idname == "ShaderNodeSubsurfaceScattering"
+    )
+    assert subsurface.falloff == "BURLEY"
+    assert subsurface.inputs["Color"].is_linked, "the ramp has to reach the body"
+
+
+def test_glass_subsurface_takes_a_fixed_colour_too():
+    from blender_gala.scene import materials
+
+    material = materials.build_glass_subsurface(
+        name="GALA Test Fixed", color=(1.0, 0.0, 1.0, 1.0)
+    )
+    subsurface = next(
+        n
+        for n in material.node_tree.nodes
+        if n.bl_idname == "ShaderNodeSubsurfaceScattering"
+    )
+    assert not subsurface.inputs["Color"].is_linked
+    assert tuple(subsurface.inputs["Color"].default_value) == pytest.approx(
+        (1.0, 0.0, 1.0, 1.0)
+    )
+
+
 def test_unknown_material_preset_raises():
     from blender_gala.scene import materials
 

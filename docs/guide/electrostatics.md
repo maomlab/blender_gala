@@ -149,6 +149,36 @@ Glass also wants an environment to refract — `lighting_style="both"` puts a
 studio HDRI under the three-point rig — and it wants more light than an opaque
 molecule, since what reaches the interior has crossed the shell twice.
 
+### A scattering body under a glass shell
+
+`material=` also takes a material you built yourself, and the one the vignette
+uses is not a Principled material at all:
+
+```python
+from blender_gala.scene import materials
+
+surface = materials.build_glass_subsurface(
+    mix=0.4,                            # 40% glass over 60% subsurface
+    subsurface_scale=20.0,
+    subsurface_radius=(0.1, 0.2, 0.1),
+    glass_roughness=0.2,
+    glass_ior=0.2,
+)
+gala.electrostatic_surface(mol, material=surface)
+```
+
+Light entering this one scatters *inside* the surface rather than crossing it,
+which is what gives the ramp depth: the colour comes from within a body
+instead of off a film. The glass IOR of 0.2 is deliberate and is not
+glass-in-air — below 1 the shell bends light the way a bubble in water does,
+and the rim lights up instead of going dark.
+
+The trade-off is what happens to whatever is underneath. A scattering surface
+does not transmit an image, so a cartoon inside stops being a fold you can
+trace and becomes a glow that lights the shell from within. If the fold is the
+point, use `"glass_surface"`, which refracts rather than scatters; if the map
+is the point, this reads better than anything else here.
+
 ## Caustics
 
 Cycles will not show a caustic unless it is asked three times over, which is

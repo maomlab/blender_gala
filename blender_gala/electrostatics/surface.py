@@ -318,7 +318,7 @@ def electrostatic_surface(
     quality: int = 3,
     add_style: bool = True,
     cmap: str = "bwr",
-    material: str = "surface",
+    material: Any = "surface",
     material_options: dict[str, Any] | None = None,
     style_options: dict[str, Any] | None = None,
     **apbs_options: Any,
@@ -352,8 +352,10 @@ def electrostatic_surface(
         have set up yourself.
     cmap : str, optional
         Colormap name.
-    material : str, optional
-        Material preset for the surface. ``"surface"`` is alpha-blended and
+    material : str or bpy.types.Material, optional
+        Material preset for the surface, or a material built elsewhere — see
+        :func:`~blender_gala.scene.materials.build_glass_subsurface` for one
+        that is not a Principled preset. ``"surface"`` is alpha-blended and
         cheap; ``"glass_surface"`` refracts, which costs samples and can focus
         light onto whatever is inside — see
         :func:`~blender_gala.scene.render.enable_caustics`.
@@ -401,18 +403,21 @@ def electrostatic_surface(
         settings.update(style_options or {})
         molecule.add_style(mn.StyleSurface(**settings), color=None)
 
-    overrides = dict(material_options or {})
-    if alpha is not None:
-        overrides["alpha"] = alpha
-    if material not in gala_materials.MATERIAL_PRESETS:
-        raise ValueError(
-            f"unknown material preset {material!r}; "
-            f"choose from {sorted(gala_materials.MATERIAL_PRESETS)}"
+    if isinstance(material, str):
+        if material not in gala_materials.MATERIAL_PRESETS:
+            raise ValueError(
+                f"unknown material preset {material!r}; "
+                f"choose from {sorted(gala_materials.MATERIAL_PRESETS)}"
+            )
+        overrides = dict(material_options or {})
+        if alpha is not None:
+            overrides["alpha"] = alpha
+        built = gala_materials.build_material(
+            gala_materials.MATERIAL_PRESETS[material].with_(**overrides),
+            name="GALA Electrostatic Surface",
         )
-    built = gala_materials.build_material(
-        gala_materials.MATERIAL_PRESETS[material].with_(**overrides),
-        name="GALA Electrostatic Surface",
-    )
+    else:
+        built = material
     styles = gala_materials.assign_material(
         molecule if molecule is not None else structure, built, style="surface"
     )

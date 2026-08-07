@@ -14,10 +14,11 @@ and radii, APBS solves the Poisson-Boltzmann equation on a grid around the
 molecule, and the potential is painted onto a molecular surface.
 
 Where Blender goes further is what the surface is made of. Here it is thin
-glass rather than an alpha-blended film: it refracts the cartoon underneath,
-picks up total internal reflection around the rim, and focuses the key light
-into caustics on the fold inside. A rasterised viewer cannot do that at any
-setting, because there is no such thing there as a light path.
+a scattering body under a glass shell rather than an alpha-blended film: light
+entering it scatters inside instead of crossing it, the rim lights up rather
+than going dark, and the key light focuses through the shell into caustics on
+the cartoon within. A rasterised viewer cannot do any of that at any setting,
+because there is no such thing there as a light path.
 
 Needs `apbs` and `pdb2pqr`. Both install with pip::
 
@@ -144,24 +145,27 @@ heading("3. The potential, on the surface")
 # the light that gets through can be focused. None of that is a trick a
 # rasterised viewer can do — it is the reason to render a molecule in a path
 # tracer at all.
+# Subsurface scattering under a glass shell, mixed 60:40. Light entering the
+# surface scatters inside it instead of crossing it, which is what gives the
+# ramp its depth: the colour comes from within a body rather than off a film.
+# The glass IOR of 0.2 is deliberate and is not glass-in-air — below 1 the
+# shell bends light the way a bubble in water does, and the rim lights up
+# rather than going dark.
+surface_material = gala_materials.build_glass_subsurface(
+    name="GALA Electrostatic Surface",
+    mix=0.4,
+    subsurface_scale=20.0,
+    subsurface_radius=(0.1, 0.2, 0.1),
+    glass_roughness=0.2,
+    glass_ior=0.2,
+)
 surfaces = {
     name: gala.electrostatic_surface(
         molecule,
         grid=runs[name].grid,
         ramp=RAMP,
         quality=4,
-        material="glass_surface",
-        # Not perfectly polished: a little roughness keeps the ramp legible
-        # through the shell, where a mirror finish would show mostly highlight.
-        material_options={
-            "roughness": 0.06,
-            "color_mix": 0.62,
-            # A little short of full transmission. The remaining fraction is
-            # diffuse, and it is what keeps the ramp readable straight on: a
-            # perfect refractor only shows its colour where the light grazes
-            # it, which is the rim.
-            "transmission_weight": 0.85,
-        },
+        material=surface_material,
         # A shell smooth enough to be glass. At the default probe every atom
         # is a bump, and every bump is a lens with its own highlight: the
         # figure comes out as wet gravel. A wider probe and more relaxation
@@ -174,20 +178,22 @@ for name, surface in surfaces.items():
     print(f"  {name}")
     print("    " + surface.summary().replace("\n", "\n    "))
 
-# The cartoon under the glass is deliberately colourless: the colour in this
+# The cartoon under the shell is deliberately colourless: the colour in this
 # figure means potential, and a second colour scheme inside the surface would
-# be a second thing to decode.
+# be a second thing to decode. Under a scattering surface it reads as a glow
+# rather than as a fold you can trace, so it is turned up until it lights the
+# shell from within — which is a real thing the fold is doing to the picture,
+# not a decoration.
 interior = gala_materials.build_material(
     gala_materials.GalaMaterialSpec(
         base_color=(0.86, 0.88, 0.91, 1.0),
         use_attribute_color=False,
         roughness=0.42,
-        subsurface_weight=0.05,
         # Faintly self-lit. Two crossings of a coloured shell take most of
         # what the lights send in, and a cartoon that is only lit is a dark
         # shape rather than a fold you can follow.
-        emission_color=(0.86, 0.88, 0.91, 1.0),
-        emission_strength=0.25,
+        emission_color=(0.90, 0.92, 0.95, 1.0),
+        emission_strength=1.0,
         description="Neutral cartoon, seen through the potential surface.",
     ),
     name="GALA Interior Cartoon",

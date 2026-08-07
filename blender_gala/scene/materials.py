@@ -31,6 +31,7 @@ __all__ = [
     "GalaMaterialSpec",
     "assign_material",
     "assign_materials",
+    "build_glass_subsurface",
     "build_material",
     "get_material",
 ]
@@ -460,6 +461,112 @@ def build_material(
             material.cycles.is_caustics_light = False
 
     material["gala_preset"] = getattr(spec, "description", "")
+    return material
+
+
+def build_glass_subsurface(
+    name: str = "GALA Glass Subsurface",
+    mix: float = 0.4,
+    color: Any = None,
+    color_mix: float = 1.0,
+    subsurface_scale: float = 20.0,
+    subsurface_radius: tuple[float, float, float] = (0.1, 0.2, 0.1),
+    glass_color: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0),
+    glass_roughness: float = 0.2,
+    glass_ior: float = 0.2,
+    distribution: str = "BECKMANN",
+) -> Any:
+    """A subsurface-scattering body under a glass shell, mixed.
+
+    A different shape of material from the Principled ones in
+    :data:`MATERIAL_PRESETS`, and built by hand for that reason: two shaders
+    into a Mix, rather than one node with a transmission weight. What it buys
+    over Principled glass is a body — light entering the shell scatters inside
+    it instead of passing straight through, which on a molecular surface reads
+    as depth rather than as a dark window.
+
+    Parameters
+    ----------
+    name : str, optional
+        Material name. An existing material of this name is rebuilt in place.
+    mix : float, optional
+        Weight of the glass shader, 0 to 1. The remainder is subsurface.
+    color : sequence of float, optional
+        Fixed RGBA for the subsurface body. ``None`` drives it from the mesh
+        ``Color`` attribute, which is what carries a potential ramp or any
+        other per-atom colouring.
+    color_mix : float, optional
+        How much of that attribute colour to keep, mixed towards white.
+    subsurface_scale : float, optional
+        Multiplier on the scattering radius. Blender units, so it is relative
+        to the 0.01 scale Molecular Nodes gives a molecule: a radius larger
+        than the molecule makes it glow rather than scatter.
+    subsurface_radius : tuple[float, float, float], optional
+        Per-channel scattering distance before scaling.
+    glass_color : tuple[float, float, float, float], optional
+        Tint of the shell itself.
+    glass_roughness : float, optional
+        0 is a polished shell; a little roughness keeps what is underneath
+        legible through it.
+    glass_ior : float, optional
+        Index of refraction. Below 1 is not a mistake in a shell: it bends
+        light the other way, as a bubble in water does rather than a bead of
+        glass in air.
+    distribution : str, optional
+        Microfacet distribution for the glass, ``"BECKMANN"`` or ``"GGX"``.
+
+    Returns
+    -------
+    bpy.types.Material
+    """
+    bpy_mod = _require_bpy()
+
+    material = bpy_mod.data.materials.get(name)
+    if material is None:
+        material = bpy_mod.data.materials.new(name)
+    material.use_nodes = True
+
+    tree = material.node_tree
+    tree.nodes.clear()
+
+    output = tree.nodes.new("ShaderNodeOutputMaterial")
+    output.location = (600, 0)
+
+    mixer = tree.nodes.new("ShaderNodeMixShader")
+    mixer.location = (350, 0)
+    mixer.inputs["Fac"].default_value = mix
+    tree.links.new(mixer.outputs["Shader"], output.inputs["Surface"])
+
+    subsurface = tree.nodes.new("ShaderNodeSubsurfaceScattering")
+    subsurface.location = (100, 150)
+    subsurface.falloff = "BURLEY"
+    _set_input(subsurface, ("Scale",), subsurface_scale)
+    _set_input(subsurface, ("Radius",), subsurface_radius)
+    tree.links.new(subsurface.outputs["BSSRDF"], mixer.inputs[1])
+
+    glass = tree.nodes.new("ShaderNodeBsdfGlass")
+    glass.location = (100, -150)
+    glass.distribution = distribution
+    _set_input(glass, ("Color",), glass_color)
+    _set_input(glass, ("Roughness",), glass_roughness)
+    _set_input(glass, ("IOR",), glass_ior)
+    tree.links.new(glass.outputs["BSDF"], mixer.inputs[2])
+
+    if color is not None:
+        _set_input(subsurface, ("Color",), color)
+    else:
+        source, _ = _colour_input(tree, (-400, 200))
+        if color_mix < 1.0:
+            tint = tree.nodes.new("ShaderNodeMix")
+            tint.data_type = "RGBA"
+            tint.location = (-180, 200)
+            tint.inputs["Factor"].default_value = color_mix
+            colours = [socket for socket in tint.inputs if socket.type == "RGBA"]
+            colours[0].default_value = (1.0, 1.0, 1.0, 1.0)
+            tree.links.new(source, colours[1])
+            source = next(s for s in tint.outputs if s.type == "RGBA")
+        tree.links.new(source, subsurface.inputs["Color"])
+
     return material
 
 
