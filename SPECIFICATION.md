@@ -414,6 +414,57 @@ nodes editor.
 
 ---
 
+## 6a. Interoperability — PyMOL sessions
+
+**D-20a. The `.pse` format is parsed directly, not delegated to PyMOL.** A
+session is a pickled tree of plain Python lists, so it can be read anywhere.
+Shelling out to PyMOL was rejected: Blender's interpreter has no PyMOL in it,
+PyMOL is not pip-installable on every platform, and requiring one to open your
+own figure defeats the purpose. Gala reads and writes the format itself and
+needs nothing installed.
+
+The layout was established empirically against sessions written by PyMOL 3.1.8
+at every `pse_export_version` from 1.7 to 3.0 — the field order of an atom
+record is identical across all of them, later versions appending rather than
+reordering. Where the documentation and the file disagreed, the file won: the
+view matrix is stored **camera-to-world** (its columns are the camera axes in
+world space), which was settled by rendering landmarks at `+X`, `+Y` and `+Z`
+under a known view rather than by reading the manual. The committed test
+fixture is a session PyMOL wrote, because a fixture written by Gala's own
+writer would only prove the reader and writer agree with each other.
+
+**D-20b. The reader refuses every global but a fixed allowlist.** Unpickling
+executes whatever the file names, and a `.pse` is a file people email each
+other. `blender_gala.pymol.session.ALLOWED_GLOBALS` holds the seven a genuine
+session contains; anything else raises rather than being imported.
+
+**D-20c. Refuse `pse_binary_dump` rather than guess at it.** With that setting
+on, coordinates, bonds and atom records are raw C structs tagged with a layout
+version that changes between builds. Misreading them would produce a plausible
+structure with the wrong chemistry, so the reader stops and says which PyMOL
+setting to change. It is off by default, so the common case is unaffected.
+
+**D-20d. Secondary structure travels with the session.** PyMOL assigns it when
+a structure is loaded and takes a session at its word afterwards; Molecular
+Nodes derives it from a PDB's HELIX/SHEET records or computes it. Neither
+happens across an interchange file, so Gala carries the assignment explicitly
+in both directions. Without it every cartoon arrives as a loop — which is what
+the first working version did.
+
+**D-20e. Export writes world coordinates.** A molecule moved in Blender, or
+placed from a PyMOL object matrix, arrives in PyMOL where it looks on screen
+rather than where its file put it. The alternative — original coordinates plus
+a matrix — is more faithful to the source and less faithful to the figure.
+
+**D-20f. What a session cannot hold is reported, not dropped.** Maps, meshes,
+CGOs and ramps on the way in, and materials, lighting, node trees and
+non-molecular geometry on the way out, are listed in the result's `skipped`
+rather than silently discarded. Likewise a style whose selection cannot be
+resolved is written over every atom *and said so*, because a stick
+representation that quietly spreads to a whole protein is very visible.
+
+---
+
 ## 7. Blender UI
 
 **D-21. The Python API is the product; the UI is a thin shell.** Every operator
@@ -474,6 +525,11 @@ gala.label(mol, "resi 45", text="{resn}{resi}", style="card")
 gala.color_by_plddt(mol)
 gala.color_by_attribute(mol, values, cmap="viridis")
 gala.select(mol, "byres (protein within 4 of ligand)")
+
+# Interoperability
+gala.load_session("figure.pse")
+gala.save_session("from_blender.pse", selections=["pocket"])
+gala.read_session("figure.pse")          # no Blender needed
 ```
 
 ---

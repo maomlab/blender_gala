@@ -8,11 +8,14 @@ behaviour testable without simulating UI events.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import bpy
 import numpy as np
+from bpy.props import BoolProperty, IntProperty, StringProperty
 from bpy.types import Operator
+from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 from ..annotate import labels as gala_labels
 from ..color import coloring
@@ -544,6 +547,134 @@ class GALA_OT_electrostatic_surface(_GalaOperator):
 
 
 # ---------------------------------------------------------------------------
+# PyMOL sessions
+# ---------------------------------------------------------------------------
+
+
+class GALA_OT_load_pymol_session(_GalaOperator, ImportHelper):
+    """Open a PyMOL session: molecules, representations, colours and the view"""
+
+    bl_idname = "gala.load_pymol_session"
+    bl_label = "Load PyMOL Session"
+    requires_structure = False
+
+    filename_ext = ".pse"
+    filter_glob: StringProperty(
+        default="*.pse;*.psw;*.pse.gz", options={"HIDDEN"}, maxlen=255
+    )
+    state: IntProperty(
+        name="State",
+        description="Which state to build for multi-state objects",
+        default=1,
+        min=1,
+    )
+    styles: BoolProperty(
+        name="Representations",
+        description="Apply the Molecular Nodes style matching each representation",
+        default=True,
+    )
+    colors: BoolProperty(
+        name="Colours",
+        description="Carry the per-atom colours over",
+        default=True,
+    )
+    camera: BoolProperty(
+        name="Camera",
+        description="Point the scene camera the way PyMOL was pointing",
+        default=True,
+    )
+    annotations: BoolProperty(
+        name="Measurements and labels",
+        description="Recreate distance, angle and dihedral objects, and labels",
+        default=True,
+    )
+
+    def run(self, context, structure):
+        from ..pymol import load as pymol_load
+
+        context.window.cursor_set("WAIT")
+        try:
+            result = pymol_load.load_session(
+                self.filepath,
+                # The dialog counts states from 1, the way PyMOL does.
+                state=max(0, self.state - 1),
+                styles=self.styles,
+                colors=self.colors,
+                camera=self.camera,
+                measurements=self.annotations,
+                labels=self.annotations,
+            )
+        finally:
+            context.window.cursor_set("DEFAULT")
+
+        atoms = sum(len(m.object.data.vertices) for m in result.molecules.values())
+        message = f"Loaded {len(result.molecules)} object(s), {atoms} atoms."
+        if result.skipped:
+            message += f" Not converted: {'; '.join(result.skipped[:3])}"
+        self.report({"WARNING"} if result.skipped else {"INFO"}, message)
+        return {"FINISHED"}
+
+
+class GALA_OT_save_pymol_session(_GalaOperator, ExportHelper):
+    """Write the scene as a PyMOL session"""
+
+    bl_idname = "gala.save_pymol_session"
+    bl_label = "Save PyMOL Session"
+    requires_structure = False
+
+    filename_ext = ".pse"
+    filter_glob: StringProperty(
+        default="*.pse;*.pse.gz", options={"HIDDEN"}, maxlen=255
+    )
+    colors: BoolProperty(
+        name="Colours",
+        description="Carry the per-atom Color attribute over",
+        default=True,
+    )
+    styles: BoolProperty(
+        name="Representations",
+        description="Turn Molecular Nodes styles into PyMOL representations",
+        default=True,
+    )
+    camera: BoolProperty(
+        name="Camera",
+        description="Write the scene camera as the session's view",
+        default=True,
+    )
+    annotations: BoolProperty(
+        name="Measurements and labels",
+        description="Include Gala measurements and labels",
+        default=True,
+    )
+
+    def run(self, context, structure):
+        from ..pymol import save as pymol_save
+
+        result = pymol_save.save_session(
+            self.filepath,
+            colors=self.colors,
+            styles=self.styles,
+            camera=self.camera,
+            measurements=self.annotations,
+            labels=self.annotations,
+        )
+        if not result.session.molecules:
+            self.report(
+                {"WARNING"},
+                "Nothing to write: no Molecular Nodes molecules in the scene.",
+            )
+            return {"CANCELLED"}
+
+        atoms = sum(m.n_atoms for m in result.session.molecules)
+        self.report(
+            {"INFO"},
+            f"Wrote {len(result.session.molecules)} object(s), {atoms} atoms to "
+            f"{os.path.basename(result.path)}.",
+        )
+        return {"FINISHED"}
+
+
+# ---------------------------------------------------------------------------
 # Housekeeping
 # ---------------------------------------------------------------------------
 
@@ -595,6 +726,8 @@ classes = (
     GALA_OT_clear_labels,
     GALA_OT_color,
     GALA_OT_electrostatic_surface,
+    GALA_OT_load_pymol_session,
+    GALA_OT_save_pymol_session,
     GALA_OT_clear_all,
     GALA_OT_render,
 )

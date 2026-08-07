@@ -94,6 +94,20 @@ world scale of 0.01, and Gala reads that scale from the object rather than
 hard-coding it, converting only where a value crosses into Blender. A 0.15 Å
 dash radius is 0.15 Å whatever the scale.
 
+## PyMOL sessions are parsed, not delegated
+
+A `.pse` is a pickled tree of plain Python lists, so Gala reads and writes the
+format itself rather than driving a PyMOL process. Blender's interpreter has
+no PyMOL in it, and requiring one to open your own figure would defeat the
+point.
+
+Two consequences worth knowing. Unpickling runs whatever the file names, so
+the reader refuses every global except the handful a genuine session contains
+— opening a session someone emailed you cannot import `os` and call it. And
+sessions written with `pse_binary_dump` on are refused rather than guessed at:
+they hold raw C structs whose layout changes between builds, and misreading
+them would give a plausible structure with the wrong chemistry.
+
 ## Vignettes are executed by CI
 
 A tutorial that has drifted from the code is worse than no tutorial. Every

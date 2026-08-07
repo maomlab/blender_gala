@@ -178,6 +178,11 @@ def label(
             collection=gala_collections.LABELS,
             gala_type="label",
         )
+        # Where the label points, as opposed to where it ended up: the offset
+        # and any occlusion avoidance have already moved it off its atom, so
+        # the object's own location no longer says what it is labelling.
+        # Exporting the scene needs the anchor, not the resting place.
+        obj["gala_anchor"] = [float(v) for v in position]
         created.append(obj)
 
         if style == "card":

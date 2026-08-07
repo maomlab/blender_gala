@@ -125,6 +125,14 @@ def draw_measurement(
             geometry.make_line(f"{name} seg{segment}", start, end, **line_kwargs)
         )
 
+    if created:
+        # The measured points, on the first segment only. A measurement is
+        # drawn as one object per segment plus a label, so the geometry alone
+        # no longer says which points were picked — and anything that wants to
+        # rebuild the measurement later (exporting the scene to PyMOL, for
+        # one) needs exactly that. Blender units, like everything on an object.
+        created[0]["gala_points"] = [float(v) for v in points.reshape(-1)]
+
     if arc and measurement.kind == "angle":
         arc_points = geometry.arc_points(points[1], points[0], points[2])
         if len(arc_points) >= 2:

@@ -53,6 +53,7 @@ nav:
       - Measurement and labels: guide/measurement.md
       - Colouring by data: guide/colouring.md
       - Electrostatics: guide/electrostatics.md
+      - PyMOL sessions: guide/pymol.md
       - Compositing and passes: guide/compositing.md
       - The Blender UI: guide/ui.md
   - Vignettes: vignettes.md
@@ -64,6 +65,7 @@ nav:
       - Annotate: api/annotate.md
       - Colour: api/colour.md
       - Electrostatics: api/electrostatics.md
+      - PyMOL sessions: api/pymol.md
       - Core: api/core.md
   - Design decisions: design.md
   - Contributing: contributing.md
