@@ -257,6 +257,20 @@ class GALA_PT_electrostatics(_GalaPanel):
         layout.operator("gala.electrostatic_surface", icon="OUTLINER_OB_FORCE_FIELD")
 
 
+class GALA_PT_pymol(_GalaPanel):
+    """Sessions in and out. Both open a file browser with their own options."""
+
+    bl_idname = "GALA_PT_pymol"
+    bl_label = "PyMOL Session"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        column = layout.column(align=True)
+        column.operator("gala.load_pymol_session", icon="IMPORT")
+        column.operator("gala.save_pymol_session", icon="EXPORT")
+
+
 class GALA_PT_cleanup(_GalaPanel):
     bl_idname = "GALA_PT_cleanup"
     bl_label = "Clean Up"
@@ -277,6 +291,7 @@ classes = (
     GALA_PT_label,
     GALA_PT_color,
     GALA_PT_electrostatics,
+    GALA_PT_pymol,
     GALA_PT_cleanup,
 )
 

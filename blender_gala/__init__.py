@@ -27,6 +27,10 @@ Quick start
     # APBS electrostatics, painted onto a translucent surface.
     gala.electrostatic_surface(mol, ramp=5.0)
 
+    # Open a PyMOL session, or write the scene back out as one.
+    gala.load_session("figure.pse")
+    gala.save_session("from_blender.pse")
+
 Selections use PyMOL syntax throughout, so ``"byres (protein within 4 of
 ligand)"`` means what you would expect.
 
@@ -41,7 +45,7 @@ import os
 import tomllib
 
 # --- subpackages -----------------------------------------------------------
-from . import annotate, color, core, electrostatics, interactions, measure, scene
+from . import annotate, color, core, electrostatics, interactions, measure, pymol, scene
 from .annotate import (
     clear_labels,
     label,
@@ -108,6 +112,14 @@ from .measure import (
     distance,
 )
 from .measure import measure as measure_atoms
+from .pymol import (
+    PymolSession,
+    PymolSessionError,
+    load_session,
+    read_session,
+    save_session,
+    write_session,
+)
 from .scene import (
     assign_material,
     assign_materials,
@@ -151,6 +163,8 @@ __all__ = [
     "Measurement",
     "MolecularNodesUnavailable",
     "PotentialGrid",
+    "PymolSession",
+    "PymolSessionError",
     "Selection",
     "SelectionSyntaxError",
     "StructureError",
@@ -193,6 +207,7 @@ __all__ = [
     "label_atoms",
     "label_hud",
     "label_residues",
+    "load_session",
     "measure",
     "measure_atoms",
     "metal_coordination",
@@ -202,12 +217,15 @@ __all__ = [
     "polar_contacts",
     "potential_at_atoms",
     "publication_setup",
+    "pymol",
     "read_colors",
     "read_dx",
+    "read_session",
     "register",
     "render",
     "run_apbs",
     "salt_bridges",
+    "save_session",
     "scene",
     "select",
     "select_indices",
@@ -217,6 +235,7 @@ __all__ = [
     "three_point_lighting",
     "unregister",
     "write_colors",
+    "write_session",
 ]
 
 

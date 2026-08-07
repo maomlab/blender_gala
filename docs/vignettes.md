@@ -109,3 +109,19 @@ on so the key light focuses through the shell onto the fold inside. That is
 the argument for rendering a molecule in a path tracer rather than a viewer:
 the same map, lit rather than drawn. Needs `apbs` and `pdb2pqr`;
 `pip install apbs-binary pdb2pqr`, or `make apbs`.
+
+## 8. PyMOL sessions
+
+![08_pymol_session](images/08_pymol_session.png)
+
+`08_pymol_session.py` — the round trip. It reads a session PyMOL itself wrote
+(the one the tests use), reports what is in it without needing PyMOL
+installed, then builds a scene of adenylate kinase, writes it out as a `.pse`,
+clears everything, and rebuilds the scene from that file alone.
+
+The figure above is the rebuilt one: the cartoon, the ligand, the binding-site
+colouring and the camera all came back out of the session. The vignette checks
+the round trip rather than asserting it — atom count, largest positional
+drift, largest colour change, and whether the B-factors survived — and prints
+what a session cannot carry, which is the lighting and materials that made it
+worth opening Blender.

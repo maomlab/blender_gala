@@ -64,6 +64,17 @@ picker. Choosing **CSV File** adds the column names to read it with.
 
     ![The Colour panel set to a CSV file](../images/ui/colour-csv.png){ width="250" }
 
+### PyMOL Session
+
+*Load PyMOL Session* opens a `.pse` — molecules, representations, per-atom
+colours, measurements and the camera. *Save PyMOL Session* writes the scene
+back out as one. Both open a file browser with their own options in its
+sidebar: which state to build, and whether to bring across representations,
+colours, the camera, and measurements and labels.
+
+Neither needs PyMOL installed. See [PyMOL sessions](pymol.md) for what
+survives each direction.
+
 ### Clean Up
 
 *Clear All Gala Objects* removes everything Gala added — interactions,

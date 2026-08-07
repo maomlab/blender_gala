@@ -23,6 +23,7 @@ gala.find_interactions(mol, "ligand", "protein")  # H-bonds, salt bridges, stack
 gala.distance(mol, "resi 15 and name CA", "resi 90 and name CA", draw=True)
 gala.label(mol, "byres (protein within 4 of ligand)")
 gala.color_by_plddt(mol)
+gala.load_session("figure.pse")                   # or open a PyMOL session
 ```
 
 Everything is also available from a **Gala** tab in the 3D View sidebar, so
@@ -80,6 +81,12 @@ it" to "render this and put it in a paper":
   APBS plugin does it — sampled where the surface actually is rather than at
   the atom centres, with buried atoms left uncoloured. Reads an existing
   OpenDX map too.
+
+- **PyMOL sessions, both ways.** Open a `.pse` in Blender — molecules,
+  representations, per-atom colours, secondary structure, selections,
+  measurements and the camera — and write the scene back out as one. The
+  format is parsed directly, so no PyMOL install is needed, and the reader
+  refuses to import anything a pickle asks it to.
 
 - **Data-driven colour.** AlphaFold pLDDT with the official confidence bands,
   B-factors, or any per-residue value from an array, a dict or a CSV, through

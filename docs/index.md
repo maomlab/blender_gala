@@ -22,6 +22,7 @@ gala.find_interactions(mol, "ligand", "protein")
 gala.distance(mol, "resi 15 and name CA", "resi 90 and name CA", draw=True)
 gala.color_by_plddt(mol)
 gala.electrostatic_surface(mol)          # APBS, on a translucent surface
+gala.load_session("figure.pse")          # open a PyMOL session
 ```
 
 Everything is also available from a **Gala** tab in the 3D View sidebar.
@@ -57,6 +58,10 @@ Everything is also available from a **Gala** tab in the 3D View sidebar.
 -   :material-flash: **[Electrostatics](guide/electrostatics.md)**
 
     APBS potential on a translucent surface.
+
+-   :material-swap-horizontal: **[PyMOL sessions](guide/pymol.md)**
+
+    Open a `.pse` in Blender, and write one back out.
 
 </div>
 
