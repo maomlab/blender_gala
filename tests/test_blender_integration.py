@@ -896,3 +896,88 @@ def test_register_unregister_is_repeatable(clean_scene):
         assert hasattr(bpy.types.Scene, "gala")
         blender_gala.unregister()
         assert not hasattr(bpy.types.Scene, "gala")
+
+
+# ---------------------------------------------------------------------------
+# Labels sized to the frame
+# ---------------------------------------------------------------------------
+
+
+def _camera_at(distance: float):
+    """A camera at ``distance`` above the origin, looking down -Z."""
+    import bpy
+
+    scene = bpy.context.scene
+    scene.render.resolution_x = scene.render.resolution_y = 512
+    data = bpy.data.cameras.new("Test Camera")
+    camera = bpy.data.objects.new("Test Camera", data)
+    scene.collection.objects.link(camera)
+    scene.camera = camera
+    camera.location = (0.0, 0.0, distance)
+    camera.rotation_euler = (0.0, 0.0, 0.0)
+    # matrix_world is stale until the depsgraph catches up, and everything
+    # here reads the camera through it.
+    bpy.context.view_layer.update()
+    return camera
+
+
+def test_frame_relative_label_size_tracks_the_depth(clean_scene):
+    """Twice as far from the camera is twice as big in the world to look the
+    same size on screen. A fixed size in angstrom cannot do that, which is why
+    a close-up gets a value across half the frame."""
+    from blender_gala.measure.draw import _frame_relative_size
+
+    _camera_at(10.0)
+    near = _frame_relative_size(np.array([0.0, 0.0, 5.0]), 0.01)
+    far = _frame_relative_size(np.array([0.0, 0.0, 0.0]), 0.01)
+
+    assert near > 0.0
+    assert far == pytest.approx(near * 2.0, rel=1e-3)
+
+
+def test_frame_relative_label_size_is_a_share_of_the_frame(clean_scene):
+    from blender_gala.measure.draw import LABEL_FRAME_FRACTION, _frame_relative_size
+    from blender_gala.scene.camera import visible_height
+
+    camera = _camera_at(10.0)
+    size = _frame_relative_size(np.array([0.0, 0.0, 0.0]), 0.01)
+    height = visible_height(10.0, camera)
+
+    # In angstrom, which is what draw_measurement takes.
+    assert size == pytest.approx(height * LABEL_FRAME_FRACTION / 0.01)
+
+
+def test_frame_relative_label_size_falls_back_without_a_camera(clean_scene):
+    from blender_gala.measure.draw import _frame_relative_size
+
+    assert _frame_relative_size(np.array([0.0, 0.0, 0.0]), 0.01) == pytest.approx(1.5)
+
+
+@requires_mn
+def test_an_automatic_label_is_smaller_in_a_close_up(site_molecule):
+    """The same measurement, drawn from two camera distances."""
+    import blender_gala as gala
+    from blender_gala.core import collections as gala_collections
+
+    def label_size(distance: float) -> float:
+        gala_collections.clear()
+        _camera_at(distance)
+        gala.distance(
+            site_molecule,
+            "resi 1 and name CA",
+            "resi 3 and name CA",
+            draw=True,
+            label_size=None,
+            label_avoid_occlusion=False,
+        )
+        texts = [
+            obj
+            for obj in gala_collections.iter_tagged()
+            if obj.type == "FONT" and "label" in str(obj.get("gala_type", ""))
+        ]
+        assert texts
+        return texts[0].data.size
+
+    close = label_size(0.5)
+    far = label_size(5.0)
+    assert close < far

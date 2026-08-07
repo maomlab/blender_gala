@@ -651,6 +651,10 @@ def test_reps_map_to_styles_and_back(clean_scene, tmp_path):
     from blender_gala.pymol.save import REP_MAP
 
     for rep in STYLE_MAP:
+        # ball_and_stick is the one key that is not a PyMOL representation:
+        # it is what its sticks and spheres together mean.
+        if rep == "ball_and_stick":
+            continue
         assert rep in REPS
     for reps in REP_MAP.values():
         for rep in reps:
@@ -678,3 +682,272 @@ def test_colours_survive_the_colour_space_round_trip(clean_scene, tmp_path):
         original = before.atom_colors(before.find(name))
         again = after.atom_colors(after.find(name))
         assert again == pytest.approx(original, abs=1.5 / 255)
+
+
+# ---------------------------------------------------------------------------
+# The Blender UI
+# ---------------------------------------------------------------------------
+
+
+@requires_bpy
+def test_the_operators_and_panel_register(clean_scene):
+    import bpy
+
+    import blender_gala
+
+    blender_gala.register()
+    try:
+        assert hasattr(bpy.ops.gala, "load_pymol_session")
+        assert hasattr(bpy.ops.gala, "save_pymol_session")
+        assert hasattr(bpy.types, "GALA_PT_pymol")
+    finally:
+        blender_gala.unregister()
+
+
+@requires_bpy
+def test_sessions_appear_in_the_file_menus(clean_scene):
+    """Where someone handed a .pse looks first, rather than only the sidebar."""
+    import bpy
+
+    import blender_gala
+    from blender_gala.ui import menus
+
+    def drawn(name):
+        return list(getattr(bpy.types, name)._dyn_ui_initialize())
+
+    blender_gala.register()
+    try:
+        assert menus.draw_import in drawn("TOPBAR_MT_file_import")
+        assert menus.draw_export in drawn("TOPBAR_MT_file_export")
+    finally:
+        blender_gala.unregister()
+
+    assert menus.draw_import not in drawn("TOPBAR_MT_file_import")
+    assert menus.draw_export not in drawn("TOPBAR_MT_file_export")
+
+
+@requires_bpy
+def test_menu_registration_survives_a_second_copy(clean_scene):
+    """Extension installed *and* a checkout on sys.path is the normal
+    developer setup, so neither direction may double up or raise."""
+    import bpy
+
+    from blender_gala.ui import menus
+
+    menus.register()
+    menus.register()
+    try:
+        appended = [
+            f
+            for f in bpy.types.TOPBAR_MT_file_import._dyn_ui_initialize()
+            if f is menus.draw_import
+        ]
+        assert len(appended) == 1
+    finally:
+        menus.unregister()
+        menus.unregister()
+
+
+@requires_mn
+def test_the_import_operator_loads_a_session(clean_scene):
+    import bpy
+
+    import blender_gala
+
+    blender_gala.register()
+    try:
+        assert bpy.ops.gala.load_pymol_session(filepath=FIXTURE) == {"FINISHED"}
+        assert len([o for o in bpy.data.objects if o.type == "MESH"]) >= 2
+    finally:
+        blender_gala.unregister()
+
+
+@requires_mn
+def test_the_export_operator_writes_a_session(clean_scene, tmp_path):
+    import bpy
+
+    import blender_gala
+    from blender_gala.pymol.load import load_session
+
+    load_session(FIXTURE)
+    path = str(tmp_path / "written.pse")
+
+    blender_gala.register()
+    try:
+        assert bpy.ops.gala.save_pymol_session(filepath=path) == {"FINISHED"}
+    finally:
+        blender_gala.unregister()
+
+    assert {m.name for m in read_session(path).molecules} == {"site", "shell"}
+
+
+# ---------------------------------------------------------------------------
+# One object, several representations
+# ---------------------------------------------------------------------------
+
+
+def _molecule_with_reps(reps: dict[str, list[int]], n_atoms: int = 6) -> PymolMolecule:
+    """A molecule whose atoms are shown in the given representations."""
+    from blender_gala.pymol.session import REPS
+
+    molecule = _minimal_molecule()
+    for name in (
+        "coord",
+        "chain_id",
+        "res_id",
+        "ins_code",
+        "res_name",
+        "atom_name",
+        "element",
+        "alt_id",
+        "segi",
+        "b_factor",
+        "occupancy",
+        "charge",
+        "vdw",
+        "hetero",
+        "label",
+        "color_index",
+    ):
+        value = getattr(molecule, name)
+        repeat = n_atoms // len(value) + 1
+        trimmed = np.concatenate([value] * repeat)[:n_atoms]
+        setattr(molecule, name, trimmed)
+    molecule.coord = np.zeros((1, n_atoms, 3))
+    molecule.reps = np.zeros(n_atoms, dtype=np.int64)
+    for rep, atoms in reps.items():
+        molecule.reps[atoms] |= 1 << REPS.index(rep)
+    return molecule
+
+
+def test_sticks_and_spheres_over_the_same_atoms_become_ball_and_stick():
+    """PyMOL has no ball-and-stick representation: it draws sticks and spheres
+    together and shrinks the spheres. Molecular Nodes has the style, and one
+    of those beats two fighting over the same atoms."""
+    from blender_gala.pymol.load import _style_plan
+
+    molecule = _molecule_with_reps(
+        {"sticks": [0, 1, 2], "spheres": [1, 2], "cartoon": [3, 4, 5]}
+    )
+    plan = dict(_style_plan(molecule, np.ones(6, dtype=bool)))
+
+    assert list(plan["ball_and_stick"]) == [False, True, True, False, False, False]
+    # Atom 0 had sticks and no sphere, so it stays a plain stick.
+    assert list(plan["sticks"]) == [True, False, False, False, False, False]
+    assert "spheres" not in plan
+    assert list(plan["cartoon"]) == [False, False, False, True, True, True]
+
+
+def test_representations_that_do_not_overlap_are_left_alone():
+    from blender_gala.pymol.load import _style_plan
+
+    molecule = _molecule_with_reps({"sticks": [0, 1], "cartoon": [2, 3]})
+    plan = dict(_style_plan(molecule, np.ones(6, dtype=bool)))
+
+    assert "ball_and_stick" not in plan
+    assert list(plan["sticks"]) == [True, True, False, False, False, False]
+
+
+def test_style_masks_narrow_to_the_atoms_that_were_built():
+    """A session can hold atoms it has no coordinates for. Those cannot be
+    built, so every per-atom mask has to be narrowed to match — otherwise it
+    is the wrong length and silently does nothing at all."""
+    from blender_gala.pymol.load import _style_plan
+
+    molecule = _molecule_with_reps({"cartoon": [0, 1, 2, 3], "sticks": [4, 5]})
+    kept = np.array([True, False, True, True, True, False])
+
+    plan = dict(_style_plan(molecule, kept))
+    assert len(plan["cartoon"]) == int(kept.sum())
+    assert list(plan["cartoon"]) == [True, True, True, False]
+    assert list(plan["sticks"]) == [False, False, False, True]
+
+
+@requires_mn
+def test_an_object_with_missing_coordinates_still_gets_its_styles(clean_scene):
+    """The case from a real session: 1620 of 9968 atoms had no coordinates,
+    which left every mask the wrong length and the molecule with no styles."""
+    from blender_gala.pymol.load import load_session
+
+    session = read_session(FIXTURE)
+    site = session.find("site")
+    # Take the coordinates away from an atom that is in the cartoon.
+    in_cartoon = np.flatnonzero(site.rep_mask("cartoon"))
+    site.coord[0, in_cartoon[0]] = np.nan
+
+    result = load_session(session, measurements=False, labels=False)
+
+    entity = result.molecules["site"]
+    assert len(entity.object.data.vertices) == site.n_atoms - 1
+    assert "cartoon" in result.styles["site"]
+    assert any("no coordinates" in note for note in result.skipped)
+
+    mask = np.zeros(len(entity.object.data.vertices), dtype=bool)
+    entity.object.data.attributes["pymol_cartoon"].data.foreach_get("value", mask)
+    assert mask.sum() == len(in_cartoon) - 1
+
+
+# ---------------------------------------------------------------------------
+# Making the imported scene renderable
+# ---------------------------------------------------------------------------
+
+
+def test_an_unknown_lighting_style_is_rejected():
+    from blender_gala.pymol.load import load_session
+
+    with pytest.raises(ValueError, match="lighting must be"):
+        load_session(FIXTURE, lighting="spotlight")
+
+
+@requires_mn
+def test_load_session_lights_the_scene(clean_scene):
+    """A session carries no lighting — PyMOL has none to carry — so an import
+    that stops at the geometry renders black."""
+    from blender_gala.pymol.load import load_session
+
+    result = load_session(FIXTURE)
+
+    assert len(result.lights) == 3
+    assert {light.data.type for light in result.lights} == {"AREA"}
+    assert all(light.data.energy > 0 for light in result.lights)
+
+
+@requires_mn
+def test_load_session_assigns_materials(clean_scene):
+    from blender_gala.pymol.load import load_session
+
+    result = load_session(FIXTURE)
+
+    assigned = result.materials["site"]
+    # The scheme reads the style, so a cartoon is polymer and sticks are not.
+    assert assigned["cartoon"] == "protein"
+    assert assigned["sticks"] == "ligand"
+    assert result.materials["shell"]["surface"] == "surface"
+
+
+@requires_mn
+def test_assigned_materials_keep_the_session_colours(clean_scene):
+    """The presets take their colour from the mesh, so assigning them decides
+    how the colour is shown rather than replacing it."""
+    from blender_gala.color.colormaps import srgb_to_linear
+    from blender_gala.pymol.load import load_session
+
+    result = load_session(FIXTURE)
+    mesh = result.molecules["site"].object.data
+
+    colors = np.zeros(len(mesh.vertices) * 4, dtype=np.float32)
+    mesh.attributes["Color"].data.foreach_get("color", colors)
+    skyblue = srgb_to_linear(np.array([0.2, 0.502, 0.8]))
+    assert any(
+        row[:3] == pytest.approx(skyblue, abs=0.01) for row in colors.reshape(-1, 4)
+    )
+
+
+@requires_mn
+def test_lighting_and_materials_can_be_turned_off(clean_scene):
+    from blender_gala.pymol.load import load_session
+
+    result = load_session(FIXTURE, lighting="none", materials=None)
+
+    assert result.lights == []
+    assert result.materials == {}

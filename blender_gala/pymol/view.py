@@ -31,6 +31,7 @@ from typing import Any
 import numpy as np
 
 from ..core import units
+from ..scene import camera as gala_camera
 from .session import PymolView
 
 try:  # pragma: no cover
@@ -236,10 +237,13 @@ def camera_to_view(
             )
             or 100.0
         )
-        half = (data.ortho_scale * _vertical_share(data, scene) / scale) / 2.0
+        # An orthographic frame is the same size at every depth, so the angle
+        # that would frame the same height at the subject is what PyMOL needs
+        # if it is switched back to perspective.
+        half = gala_camera.visible_height(0.0, camera, scene) / scale / 2.0
         field_of_view = math.degrees(2.0 * math.atan2(half, distance))
     else:
-        field_of_view = math.degrees(_vertical_angle(data, scene))
+        field_of_view = math.degrees(gala_camera.vertical_field_of_view(camera, scene))
 
     return view_from_matrix(
         matrix,
@@ -249,53 +253,6 @@ def camera_to_view(
         near=data.clip_start / scale,
         far=data.clip_end / scale,
     )
-
-
-def _vertical_angle(data: Any, scene: Any) -> float:
-    """The camera's vertical field of view in radians, as actually rendered.
-
-    ``angle_y`` is the angle the sensor *height* subtends, which is the
-    rendered vertical field of view only when the sensor is fit vertically.
-    Blender's default fit is ``AUTO``, where the sensor width spans the larger
-    image dimension instead — so on a square render the vertical field of view
-    is the horizontal one, and reading ``angle_y`` there gives a camera a third
-    too tight and a figure with its edges cut off.
-    """
-    horizontal = float(getattr(data, "angle_x", math.radians(20.0)))
-    fit = getattr(data, "sensor_fit", "AUTO")
-    if fit == "VERTICAL":
-        return float(getattr(data, "angle_y", horizontal))
-
-    width, height = _frame_size(scene)
-    if fit == "AUTO" and height > width:
-        # The sensor width spans the vertical dimension.
-        return horizontal
-    return 2.0 * math.atan(math.tan(horizontal / 2.0) * height / width)
-
-
-def _vertical_share(data: Any, scene: Any) -> float:
-    """What fraction of ``ortho_scale`` the rendered height covers.
-
-    ``ortho_scale`` measures the fit axis, which is not the vertical one
-    unless the camera says so.
-    """
-    fit = getattr(data, "sensor_fit", "AUTO")
-    if fit == "VERTICAL":
-        return 1.0
-    width, height = _frame_size(scene)
-    if fit == "AUTO" and height > width:
-        return 1.0
-    return height / width
-
-
-def _frame_size(scene: Any) -> tuple[float, float]:
-    """The rendered image size in square pixels."""
-    render = getattr(scene, "render", None)
-    if render is None:  # pragma: no cover - always present in Blender
-        return 1.0, 1.0
-    width = float(render.resolution_x) * float(render.pixel_aspect_x)
-    height = float(render.resolution_y) * float(render.pixel_aspect_y)
-    return (width or 1.0), (height or 1.0)
 
 
 def _orthonormal(rotation: np.ndarray) -> np.ndarray:

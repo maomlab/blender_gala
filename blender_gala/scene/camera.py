@@ -25,7 +25,14 @@ except ImportError:  # pragma: no cover
     bpy = None  # type: ignore[assignment,misc]
     Vector = None  # type: ignore[assignment,misc]
 
-__all__ = ["VIEWPOINTS", "ensure_camera", "frame_target", "orbit"]
+__all__ = [
+    "VIEWPOINTS",
+    "ensure_camera",
+    "frame_target",
+    "orbit",
+    "vertical_field_of_view",
+    "visible_height",
+]
 
 #: Named viewpoints, as ``(azimuth, elevation)`` in degrees. Azimuth is
 #: measured about ``+Z`` from ``-Y``, matching :mod:`blender_gala.scene.lighting`.
@@ -111,6 +118,78 @@ def _half_fov_tangents(camera_data: Any, scene: Any) -> tuple[float, float]:
         tan_v = tan_h / aspect if aspect else tan_h
 
     return max(tan_h, 1e-6), max(tan_v, 1e-6)
+
+
+def vertical_field_of_view(camera: Any = None, scene: Any = None) -> float:
+    """The camera's vertical field of view in radians, as actually rendered.
+
+    Not ``camera.data.angle_y``, which is the angle the sensor *height*
+    subtends and is the rendered field of view only when the sensor is fit
+    vertically. Blender's default fit is ``AUTO``, where the sensor width
+    spans the larger image dimension instead.
+
+    Returns
+    -------
+    float
+        Radians.
+
+    Raises
+    ------
+    ValueError
+        If there is no camera.
+    """
+    module = _require_bpy()
+    scene = scene or module.context.scene
+    camera = camera or scene.camera
+    if camera is None:
+        raise ValueError("the scene has no camera")
+    return float(2.0 * math.atan(_half_fov_tangents(camera.data, scene)[1]))
+
+
+def visible_height(distance: float, camera: Any = None, scene: Any = None) -> float:
+    """How tall the frame is, in Blender units, ``distance`` from the camera.
+
+    What a figure needs to size anything by how big it will *look* rather than
+    how big it is: text at a fixed size in ångström is legible on a whole
+    protein and covers the frame in a close-up, because the two are the same
+    number of ångström and a very different number of pixels.
+
+    Parameters
+    ----------
+    distance : float
+        Distance in front of the camera, in Blender units. Ignored by an
+        orthographic camera, whose frame is the same size at every depth.
+    camera : bpy.types.Object, optional
+        Defaults to the scene camera.
+    scene : bpy.types.Scene, optional
+
+    Returns
+    -------
+    float
+        Frame height in Blender units.
+
+    Raises
+    ------
+    ValueError
+        If there is no camera.
+    """
+    module = _require_bpy()
+    scene = scene or module.context.scene
+    camera = camera or scene.camera
+    if camera is None:
+        raise ValueError("the scene has no camera")
+
+    data = camera.data
+    if getattr(data, "type", "PERSP") == "ORTHO":
+        render = scene.render
+        width = render.resolution_x * render.pixel_aspect_x
+        height = render.resolution_y * render.pixel_aspect_y
+        fit = getattr(data, "sensor_fit", "AUTO")
+        if fit == "VERTICAL" or (fit == "AUTO" and height > width):
+            return float(data.ortho_scale)
+        return float(data.ortho_scale * (height / width if width else 1.0))
+
+    return float(2.0 * abs(distance) * _half_fov_tangents(data, scene)[1])
 
 
 def _fit_distance(radius: float, camera_data: Any, scene: Any, margin: float) -> float:

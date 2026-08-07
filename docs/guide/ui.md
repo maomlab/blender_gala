@@ -68,9 +68,19 @@ picker. Choosing **CSV File** adds the column names to read it with.
 
 *Load PyMOL Session* opens a `.pse` — molecules, representations, per-atom
 colours, measurements and the camera. *Save PyMOL Session* writes the scene
-back out as one. Both open a file browser with their own options in its
-sidebar: which state to build, and whether to bring across representations,
-colours, the camera, and measurements and labels.
+back out as one.
+
+![The PyMOL Session panel](../images/ui/pymol.png){ width="250" }
+
+Both open a file browser with their own options in its sidebar: which state to
+build, and whether to bring across representations, colours, the camera, and
+measurements and labels. Import also offers **Lighting** and **Materials**,
+which finish the scene — a session carries neither, so without them the import
+opens unlit and renders black.
+
+The same two are in **File ▸ Import ▸ PyMOL Session (.pse)** and **File ▸
+Export ▸ PyMOL Session (.pse)**, which is where the rest of Blender's formats
+live and where someone handed a session tends to look first.
 
 Neither needs PyMOL installed. See [PyMOL sessions](pymol.md) for what
 survives each direction.
