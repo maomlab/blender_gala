@@ -411,8 +411,15 @@ def test_the_glass_surface_actually_transmits():
         n for n in material.node_tree.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled"
     )
     assert principled.inputs["Transmission Weight"].default_value == pytest.approx(1.0)
-    assert principled.inputs["Thin Wall"].default_value is True
     assert principled.inputs["Alpha"].default_value == pytest.approx(1.0)
+
+    # "Thin Wall" is Blender 5.2's name for the socket and 5.1 has neither it
+    # nor the "Thin Film" it replaced, so the builder sets whichever exists
+    # and skips it otherwise. The test has to be as tolerant as the builder,
+    # or the oldest supported Blender fails on a socket that is not there.
+    thin_wall = principled.inputs.get("Thin Wall") or principled.inputs.get("Thin Film")
+    if thin_wall is not None:
+        assert thin_wall.default_value is True
 
 
 def test_colour_mix_dilutes_the_attribute_colour():
