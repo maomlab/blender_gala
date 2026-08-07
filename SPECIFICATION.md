@@ -55,6 +55,17 @@ its back, and the first's `unregister` then raises `missing bl_rna attribute`
 at shutdown. `core.registration` drops a stale registration before registering
 and never raises while tearing down, so the two copies coexist.
 
+**D-2b. Installing over a running Blender clears the old submodules.** Blender
+re-executes an add-on's top-level module when a new version is installed but
+reloads nothing below it, so every `blender_gala.*` submodule stays in
+`sys.modules` as the previous version left it. The imports in `__init__` then
+resolve against the old package and fail on the first name the new version
+added — reported as `cannot import name 'enable_caustics' from
+'...blender_gala.scene'`, which reads like a corrupt download and is really a
+cache a restart would have cleared. `_drop_stale_submodules()` runs before
+those imports and forgets them, matching on its own `__name__` so a checkout
+and an installed extension never clear each other's.
+
 **D-3. Dual importability.** Every intra-package import is relative, so the
 package works both as `bl_ext.user_default.blender_gala` (installed extension)
 and as a plain `blender_gala` on `sys.path` (tests, scripting).

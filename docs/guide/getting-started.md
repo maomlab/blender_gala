@@ -17,6 +17,20 @@ install Gala rather than run it half-working.
 3. *Edit → Preferences → Add-ons → ▾ → Install from Disk…*, choose the zip.
 4. Restart Blender.
 
+Step 4 matters when you are *upgrading*. Blender re-runs the new add-on's
+top-level module but keeps every submodule the old version had already
+imported, so a fresh install into a running Blender can fail with something
+like:
+
+```
+cannot import name 'enable_caustics' from 'bl_ext.user_default.blender_gala.scene'
+```
+
+That is a stale module cache rather than a bad download — the files on disk
+are the new ones. Gala clears those modules itself now, but the copy doing the
+clearing is the one being installed, so upgrading *from* a version older than
+this still needs the restart once. Afterwards it will not happen again.
+
 Press `N` in the 3D View and you should see a **Gala** tab.
 
 ![The Gala tab in the 3D View sidebar](../images/ui/sidebar.png){ width="280" }

@@ -84,6 +84,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]
 "vignettes/*" = ["E402"]
+# The package __init__ drops stale submodules before importing them, which by
+# construction happens between the stdlib imports and the package ones. See
+# `_drop_stale_submodules`: doing it any later is doing it too late.
+"blender_gala/__init__.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["blender_gala"]
