@@ -38,7 +38,9 @@ from .materials import (
 from .origin import geometry_centre, set_origin_to_geometry
 from .presets import PRESETS, RenderPreset, get_preset
 from .render import (
+    CausticsReport,
     GPUReport,
+    enable_caustics,
     enable_gpu,
     set_resolution,
     set_transparent,
@@ -55,6 +57,7 @@ __all__ = [
     "STUDIO_HDRIS",
     "THREE_POINT",
     "VIEWPOINTS",
+    "CausticsReport",
     "GPUReport",
     "GalaMaterialSpec",
     "LightSpec",
@@ -70,6 +73,7 @@ __all__ = [
     "compositing",
     "depth_cue",
     "depth_of_field",
+    "enable_caustics",
     "enable_gpu",
     "enable_passes",
     "ensure_camera",

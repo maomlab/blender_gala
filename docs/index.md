@@ -21,6 +21,7 @@ gala.publication_setup(mol, preset="figure")
 gala.find_interactions(mol, "ligand", "protein")
 gala.distance(mol, "resi 15 and name CA", "resi 90 and name CA", draw=True)
 gala.color_by_plddt(mol)
+gala.electrostatic_surface(mol)          # APBS, on a translucent surface
 ```
 
 Everything is also available from a **Gala** tab in the 3D View sidebar.
@@ -52,6 +53,10 @@ Everything is also available from a **Gala** tab in the 3D View sidebar.
 -   :material-palette: **[Colouring by data](guide/colouring.md)**
 
     AlphaFold confidence, B-factors, your own CSV.
+
+-   :material-flash: **[Electrostatics](guide/electrostatics.md)**
+
+    APBS potential on a translucent surface.
 
 </div>
 

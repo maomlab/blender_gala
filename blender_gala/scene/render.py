@@ -20,7 +20,9 @@ except ImportError:  # pragma: no cover
 
 __all__ = [
     "VIEW_TRANSFORMS",
+    "CausticsReport",
     "GPUReport",
+    "enable_caustics",
     "enable_gpu",
     "render",
     "set_resolution",
@@ -451,3 +453,111 @@ def render(
         write_still=not animation, animation=animation, scene=scene.name
     )
     return scene.render.filepath
+
+
+@dataclass
+class CausticsReport:
+    """What :func:`enable_caustics` switched on.
+
+    Attributes
+    ----------
+    casters : int
+        Objects marked as casting caustics.
+    receivers : int
+        Objects marked as receiving them.
+    lights : int
+        Lights allowed to produce them.
+    """
+
+    casters: int = 0
+    receivers: int = 0
+    lights: int = 0
+
+    def __str__(self) -> str:
+        return (
+            f"Caustics: {self.casters} caster(s), {self.receivers} receiver(s), "
+            f"{self.lights} light(s)"
+        )
+
+
+def enable_caustics(
+    casters: Any = (),
+    receivers: Any = (),
+    lights: Any = None,
+    transmission_bounces: int = 24,
+    scene: Any = None,
+) -> CausticsReport:
+    """Let refracted light focus onto something, and keep it sharp.
+
+    Cycles will not show a caustic by default, and three separate things are
+    in the way. The renderer's caustic paths are off; the glossy filter blurs
+    what does get through, which is what stops fireflies and also what turns a
+    caustic into a smudge; and the shortcut that makes them tractable —
+    manifold next event estimation — only runs between objects that have been
+    told they are the caster and the receiver.
+
+    This turns on all three. Nothing else in Gala needs it, and it is not part
+    of :func:`~blender_gala.scene.setup.publication_setup`, because sharp
+    caustics cost samples and most figures do not want to pay for them.
+
+    Parameters
+    ----------
+    casters : object or sequence of object
+        The refracting objects — a glass molecular surface, typically.
+    receivers : object or sequence of object
+        What the light lands on: the cartoon inside the surface, a floor, the
+        binding partner.
+    lights : object or sequence of object, optional
+        Lights allowed to cast caustics. ``None`` means every light in the
+        scene, which is usually what you want and is what makes a three-point
+        rig produce three of them.
+    transmission_bounces : int, optional
+        Light entering a closed surface and leaving it again is two bounces,
+        and it has to survive enough of them to reach the camera.
+    scene : bpy.types.Scene, optional
+        Scene to configure.
+
+    Returns
+    -------
+    CausticsReport
+    """
+    bpy_mod = _require_bpy()
+    scene = scene or bpy_mod.context.scene
+    cycles = getattr(scene, "cycles", None)
+    if cycles is None:  # pragma: no cover - Cycles is always present
+        raise RuntimeError("Cycles is not available in this build")
+
+    cycles.caustics_reflective = True
+    cycles.caustics_refractive = True
+    # The glossy filter is a blur, and a blurred caustic is just a bright
+    # patch. Zero is what the Cycles manual calls for when caustics matter.
+    cycles.blur_glossy = 0.0
+    cycles.transmission_bounces = max(cycles.transmission_bounces, transmission_bounces)
+    cycles.max_bounces = max(cycles.max_bounces, transmission_bounces + 4)
+
+    report = CausticsReport()
+    for obj in _as_sequence(casters):
+        obj.cycles.is_caustics_caster = True
+        report.casters += 1
+    for obj in _as_sequence(receivers):
+        obj.cycles.is_caustics_receiver = True
+        report.receivers += 1
+
+    if lights is None:
+        chosen = [obj for obj in scene.objects if obj.type == "LIGHT"]
+    else:
+        chosen = list(_as_sequence(lights))
+    for light in chosen:
+        data = getattr(light, "data", light)
+        data.cycles.is_caustics_light = True
+        report.lights += 1
+
+    return report
+
+
+def _as_sequence(value: Any) -> list[Any]:
+    """One object, a molecule, or a sequence of either, as a list of objects."""
+    if value is None:
+        return []
+    items = value if isinstance(value, (list, tuple, set)) else [value]
+    return [getattr(item, "object", item) for item in items]

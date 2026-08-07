@@ -52,6 +52,7 @@ nav:
       - Interactions: guide/interactions.md
       - Measurement and labels: guide/measurement.md
       - Colouring by data: guide/colouring.md
+      - Electrostatics: guide/electrostatics.md
       - Compositing and passes: guide/compositing.md
       - The Blender UI: guide/ui.md
   - Vignettes: vignettes.md
@@ -62,6 +63,7 @@ nav:
       - Measure: api/measure.md
       - Annotate: api/annotate.md
       - Colour: api/colour.md
+      - Electrostatics: api/electrostatics.md
       - Core: api/core.md
   - Design decisions: design.md
   - Contributing: contributing.md

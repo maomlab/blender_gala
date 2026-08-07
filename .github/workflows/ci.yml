@@ -171,6 +171,25 @@ jobs:
               sys.exit(f'Molecular Nodes did not install: {exc}')
           "
 
+      # The electrostatics vignette shells out to these. Both are wheels, so
+      # this is a pip install rather than a system package; APBS needs its own
+      # bundled lib/ on the loader path, which is what the wrapper is for.
+      - name: Install APBS and PDB2PQR
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade apbs-binary pdb2pqr
+          package=$(python -c "import apbs_binary, os; print(os.path.dirname(apbs_binary.__file__))")
+          mkdir -p ~/.local/bin
+          printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s/lib:$LD_LIBRARY_PATH"\nexec "%s/bin/apbs" "$@"\n' \
+            "$package" "$package" > ~/.local/bin/apbs
+          chmod +x ~/.local/bin/apbs
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: The external programs are there
+        run: |
+          apbs --version | head -1
+          pdb2pqr --version 2>&1 | tail -1
+
       # A tutorial that has drifted from the code is worse than no tutorial
       # (SPECIFICATION D-22), so every vignette is executed here. Only the
       # numbered scripts: `_common.py` is the shared helper module.

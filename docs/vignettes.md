@@ -91,3 +91,21 @@ than GIF so that it keeps a real alpha channel and the full colour range at a
 fraction of the size. It is built by `make turntable`, which is not part of
 `make vignettes`: a hundred-odd Cycles frames is more than a smoke test on
 every push should be doing.
+
+## 7. Electrostatics
+
+![07_electrostatics](images/07_electrostatics.png)
+
+`07_electrostatics.py` — barnase and barstar, each solved on its own with
+PDB2PQR and APBS, then opened out like a book so both binding faces are in
+view. Barnase's is a patch of positive, barstar's is a patch of negative, and
+the two are shaped like each other — which is why they associate as fast as
+they do. The vignette also puts a number on it: the mean potential over each
+partner's interface against the mean over the rest of its surface.
+
+The surface is thin glass rather than an alpha-blended film, with the cartoon
+underneath showing through it and refracted by it, and Cycles' caustics turned
+on so the key light focuses through the shell onto the fold inside. That is
+the argument for rendering a molecule in a path tracer rather than a viewer:
+the same map, lit rather than drawn. Needs `apbs` and `pdb2pqr`;
+`pip install apbs-binary pdb2pqr`, or `make apbs`.

@@ -277,8 +277,13 @@ def frame_target(
         )
         # Framing the silhouette can put the camera inside a molecule seen
         # end-on, where the extent across the view is small and the extent
-        # along it is not.
-        distance = max(distance, radius * 1.25)
+        # along it is not. What decides that is the subject's depth *along the
+        # view*, not its overall radius: two molecules side by side have a
+        # bounding sphere far larger than anything the camera could end up
+        # inside, and backing off by its radius leaves a figure that does not
+        # fill its frame.
+        depth = float(np.ptp(points @ basis[2]))
+        distance = max(distance, depth * 0.75)
 
     offset = unit * distance
     camera.location = tuple(float(v) for v in (centre + offset))
@@ -302,8 +307,9 @@ def _subject_points(
 ) -> np.ndarray | None:
     """World-space points to fit in the frame, or ``None`` if there are none.
 
-    Atom positions when the target is a molecule, and bounding-box corners
-    otherwise: a box is still a much closer fit than the sphere around it.
+    Atom positions when the target is a molecule; the vertices of every
+    visible mesh when there is no target, which is what makes framing a scene
+    of several molecules as tight as framing one.
     """
     from ..core.entity import AtomStructure
     from ..core.exceptions import EmptySelectionError
@@ -341,12 +347,45 @@ def _subject_points(
     else:
         return None
 
-    corners = [
-        np.array(obj.matrix_world @ Vector(corner))
-        for obj in objects
-        for corner in obj.bound_box
+    gathered: list[np.ndarray] = [
+        points
+        for points in (_object_points(obj) for obj in objects)
+        if points is not None and len(points)
     ]
-    return np.asarray(corners) if corners else None
+    return np.vstack(gathered) if gathered else None
+
+
+#: Vertices above this and an object is sampled rather than read whole. Framing
+#: is a min and a max; a hundred thousand points do not decide it any better
+#: than ten thousand do.
+_POINT_LIMIT = 10000
+
+
+def _object_points(obj: Any) -> np.ndarray | None:
+    """World-space points describing one object's extent.
+
+    Its vertices where it has them, its bounding box otherwise. The corners of
+    a box around a globular molecule stick out well past the molecule — far
+    enough that framing on them leaves a visibly loose figure — so they are
+    the fallback, not the rule.
+    """
+    mesh = getattr(obj, "data", None)
+    vertices = getattr(mesh, "vertices", None)
+    if vertices is None or len(vertices) == 0:
+        return np.asarray(
+            [np.array(obj.matrix_world @ Vector(corner)) for corner in obj.bound_box]
+        )
+
+    flat = np.empty(len(vertices) * 3, dtype=np.float32)
+    vertices.foreach_get("co", flat)
+    local = flat.reshape(-1, 3).astype(float)
+    if len(local) > _POINT_LIMIT:
+        step = len(local) // _POINT_LIMIT + 1
+        local = local[::step]
+
+    matrix = np.array(obj.matrix_world).reshape(4, 4)
+    homogeneous = np.hstack([local, np.ones((local.shape[0], 1))])
+    return (homogeneous @ matrix.T)[:, :3]
 
 
 def orbit(
