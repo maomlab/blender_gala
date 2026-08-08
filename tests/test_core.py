@@ -266,3 +266,67 @@ def test_atom_label_uses_the_template(site):
 def test_len_and_repr(site):
     assert len(site) == site.n_atoms
     assert "AtomStructure" in repr(site)
+
+
+# ---------------------------------------------------------------------------
+# Installing over a running Blender
+# ---------------------------------------------------------------------------
+
+
+def test_stale_submodules_are_dropped_before_the_package_imports():
+    """Installing a new version into a running Blender re-executes the package
+    but reloads nothing below it, so every submodule stays in sys.modules as
+    the old version left it. The imports in `__init__` then resolve against
+    the old package and fail on the first name the new version added — which
+    reads like a broken download and is really a stale cache.
+    """
+    import sys
+    import types
+
+    import blender_gala
+
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
+        if name.startswith("blender_gala.")
+    }
+    probe = "blender_gala.scene"
+    try:
+        # A submodule with none of the names the package expects, which is
+        # what a previous version's `scene` looks like to a newer `__init__`.
+        sys.modules[probe] = types.ModuleType(probe)
+
+        blender_gala._drop_stale_submodules()
+        assert probe not in sys.modules
+
+        # And the real one loads again on demand.
+        from blender_gala import scene
+
+        assert hasattr(scene, "enable_caustics")
+    finally:
+        for name in [n for n in sys.modules if n.startswith("blender_gala.")]:
+            del sys.modules[name]
+        sys.modules.update(saved)
+
+
+def test_dropping_stale_submodules_leaves_other_packages_alone():
+    """It matches on its own name, so a checkout and an installed extension
+    do not clear each other's modules."""
+    import sys
+    import types
+
+    import blender_gala
+
+    other = "blender_gala_other.scene"
+    sys.modules[other] = types.ModuleType(other)
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
+        if name.startswith("blender_gala.")
+    }
+    try:
+        blender_gala._drop_stale_submodules()
+        assert other in sys.modules
+    finally:
+        del sys.modules[other]
+        sys.modules.update(saved)

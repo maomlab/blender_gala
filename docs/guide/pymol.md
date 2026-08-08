@@ -15,8 +15,12 @@ gala.save_session("from_blender.pse")
 
 ![Adenylate kinase, exported to a session and rebuilt from it](../images/08_pymol_session.png)
 
-In the sidebar the same two are under **Gala → PyMOL Session**, each with a
-file browser and its own options.
+Without writing Python, the same two are in **File ▸ Import ▸ PyMOL Session
+(.pse)** and **File ▸ Export ▸ PyMOL Session (.pse)**, and in the sidebar under
+**Gala ▸ PyMOL Session**. Each opens a file browser with its own options: which
+state to build, and what to bring across.
+
+![The PyMOL Session panel](../images/ui/pymol.png){ width="250" }
 
 ## No PyMOL required
 
@@ -43,11 +47,12 @@ one PyMOL wrote.
 | --- | --- |
 | molecular object | a Molecular Nodes molecule |
 | cartoon, ribbon, surface, sticks, spheres | the matching MN style, on the atoms that were shown in it |
+| sticks *and* spheres over the same atoms | one **ball-and-stick** style — PyMOL has no such representation, it draws both and shrinks the spheres |
 | lines, nonbonded | sticks and spheres, thinner — MN has no line representation |
 | per-atom colour | the `Color` attribute, so every style shows the session's colours |
 | secondary structure | MN's `sec_struct`, so helices stay helices |
 | atom labels | Gala label objects |
-| distance, angle, dihedral | Gala measurements, drawn |
+| distance, angle, dihedral | Gala measurements, drawn, with values sized to the frame rather than to a fixed number of ångström |
 | named selection | a boolean attribute of the same name |
 | group | a collection |
 | object matrix | the object's world matrix |
@@ -55,6 +60,30 @@ one PyMOL wrote.
 
 Maps, meshes, CGOs and ramps have no equivalent and are listed in
 `result.skipped` rather than dropped in silence.
+
+## What is added
+
+A session has no lighting and no materials in it — PyMOL has neither to
+carry — so an import that stopped at the geometry would open correct and
+unlit, and render black. Loading therefore finishes the scene:
+
+```python
+gala.load_session(
+    "figure.pse",
+    lighting="three_point",   # or "hdri", "both", "none"
+    materials="chemistry",    # or None to leave MN's own alone
+    light_energy=1.0,
+)
+```
+
+The rig is sized from the molecules and built before the measurements and
+labels, so a label standing off to one side does not push the lights outwards.
+The materials take their colour from the mesh, so the session's per-atom
+colours are kept — what a scheme decides is the surface that colour is shown
+on: a cartoon matte, a ligand glossier, a surface softer.
+
+The camera is *not* re-framed: the session's view is the one you set in PyMOL,
+and framing it again would throw that away.
 
 ```python
 result = gala.load_session("figure.pse", state=0, styles=True, colors=True)
@@ -137,7 +166,9 @@ so this is rare.
 
 **Multi-state objects build one state at a time.** `state=` picks it, and an
 atom with no position in that state is left out rather than placed at the
-origin.
+origin. A session can also hold atoms it has no coordinates for at all; those
+are left out too, and how many is reported in `result.skipped`, since the
+molecule that arrives is then smaller than the one the session lists.
 
 ## What this is not
 

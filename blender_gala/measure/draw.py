@@ -17,6 +17,7 @@ import numpy as np
 from ..core import collections as gala_collections
 from ..core import geometry
 from ..core.entity import AtomStructure
+from ..scene import camera as gala_camera
 from ..scene import materials as gala_materials
 from .measurements import Measurement
 
@@ -35,7 +36,7 @@ def draw_measurement(
     style: str = "dashed",
     label: bool = True,
     label_template: str | None = None,
-    label_size: float = 1.5,
+    label_size: float | None = 1.5,
     label_offset: float | Sequence[float] = 0.5,
     label_card: bool = True,
     label_avoid_occlusion: bool = True,
@@ -66,8 +67,13 @@ def draw_measurement(
     label_template : str, optional
         ``str.format`` template with ``value``, ``text``, ``unit`` and ``kind``
         available. Defaults to the formatted value, e.g. ``"2.85 A"``.
-    label_size : float, optional
-        Text size in ångström.
+    label_size : float or None, optional
+        Text size in ångström. ``None`` sizes it to the *frame* instead —
+        :data:`LABEL_FRAME_FRACTION` of the visible height at the label's
+        depth — so a value reads the same whether the camera is on a whole
+        ribosome or two ångström from a hydrogen bond. A fixed size in
+        ångström cannot do both: it is legible on one and covers the frame on
+        the other.
     label_card : bool, optional
         Put a translucent pill behind the value, so white text stays readable
         over a pale molecule.
@@ -176,6 +182,8 @@ def draw_measurement(
         else:
             offset_vector = np.asarray(label_offset, dtype=float) * scale
         anchor = _label_anchor(measurement, points) + offset_vector
+        if label_size is None:
+            label_size = _frame_relative_size(anchor, scale)
         magnification = 1.0
         if label_avoid_occlusion:
             anchor, magnification = geometry.clear_of_occluders(
@@ -219,6 +227,40 @@ def draw_measurement(
                 created.append(card)
 
     return created
+
+
+#: How much of the frame's height a frame-relative label should occupy. Small
+#: enough not to sit on top of the structure, big enough to read at the sizes
+#: a figure is printed and viewed at.
+LABEL_FRAME_FRACTION = 0.035
+
+
+def _frame_relative_size(anchor: Any, scale: float) -> float:
+    """Text size in ångström that fills the same share of the frame anywhere.
+
+    Measured at the label's own depth, so a value near the camera and one
+    further back come out the same size on screen rather than the same size
+    in ångström.
+    """
+    try:
+        import bpy
+    except ImportError:  # pragma: no cover - Blender only
+        return 1.5
+
+    scene = getattr(bpy.context, "scene", None)
+    camera = scene.camera if scene is not None else None
+    if camera is None:
+        # Nothing to be relative to; the fixed default is as good a guess as
+        # any and is what the caller would have got anyway.
+        return 1.5
+
+    matrix = np.array(camera.matrix_world).reshape(4, 4)
+    towards = np.asarray(anchor, dtype=float) - matrix[:3, 3]
+    # Depth along the view axis rather than straight-line distance: that is
+    # what the projection divides by.
+    depth = abs(float(np.dot(towards, -matrix[:3, 2])))
+    height = gala_camera.visible_height(depth, camera, scene)
+    return float(height * LABEL_FRAME_FRACTION / scale)
 
 
 def _label_anchor(measurement: Measurement, points: np.ndarray) -> np.ndarray:

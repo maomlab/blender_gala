@@ -27,7 +27,8 @@ gala.load_session("figure.pse")                   # or open a PyMOL session
 ```
 
 Everything is also available from a **Gala** tab in the 3D View sidebar, so
-none of it requires writing Python.
+none of it requires writing Python. Sessions are additionally in **File ▸
+Import** and **File ▸ Export**, where the rest of Blender's formats live.
 
 ---
 

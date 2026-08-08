@@ -77,10 +77,22 @@ gala.distance(
     dash_length=0.4,
     gap_length=0.25,
     label_template="{value:.2f} A",
-    label_size=1.5,
+    label_size=1.5,               # angstrom; None sizes it to the frame
 )
 gala.clear_measurements()          # or clear_measurements("angle")
 ```
+
+### Labels that match the zoom
+
+`label_size` is in ångström, which is the right unit when the camera is on the
+whole molecule and the wrong one when it is two ångström from a hydrogen bond:
+the same value is legible in one and covers the frame in the other.
+
+`label_size=None` sizes the text to the **frame** instead — a fixed share of
+the visible height at the label's own depth — so it reads the same whatever
+the camera is doing. It is what
+[`load_session`](pymol.md) uses, because a PyMOL session's view is as often a
+close-up of a contact as it is a view of a whole complex.
 
 ## From the viewport
 

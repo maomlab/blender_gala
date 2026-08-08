@@ -13,7 +13,7 @@ from typing import Any
 
 import bpy
 import numpy as np
-from bpy.props import BoolProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
@@ -588,6 +588,28 @@ class GALA_OT_load_pymol_session(_GalaOperator, ImportHelper):
         description="Recreate distance, angle and dihedral objects, and labels",
         default=True,
     )
+    lighting: EnumProperty(
+        name="Lighting",
+        description=(
+            "Light the molecules once they are built. A session carries no "
+            "lighting of its own, so without this the scene opens unlit"
+        ),
+        items=(
+            ("three_point", "Three Point", "A studio rig sized to the molecule"),
+            ("hdri", "HDRI", "Softer, more natural environment light"),
+            ("both", "Both", "An HDRI as fill under the rig"),
+            ("none", "None", "Leave the scene unlit"),
+        ),
+        default="three_point",
+    )
+    materials: BoolProperty(
+        name="Materials",
+        description=(
+            "Assign Gala's materials to each style. They take their colour "
+            "from the mesh, so the session's colours are kept"
+        ),
+        default=True,
+    )
 
     def run(self, context, structure):
         from ..pymol import load as pymol_load
@@ -603,6 +625,8 @@ class GALA_OT_load_pymol_session(_GalaOperator, ImportHelper):
                 camera=self.camera,
                 measurements=self.annotations,
                 labels=self.annotations,
+                lighting=self.lighting,
+                materials="chemistry" if self.materials else None,
             )
         finally:
             context.window.cursor_set("DEFAULT")

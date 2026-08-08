@@ -42,7 +42,31 @@ SPECIFICATION.md : the design decisions behind these choices.
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
+
+
+def _drop_stale_submodules() -> None:
+    """Forget submodules left behind by a previous version of this add-on.
+
+    Installing a new version into a *running* Blender re-executes this module
+    but reloads nothing below it, so every ``blender_gala.*`` submodule stays
+    in ``sys.modules`` as the old version left it. The imports below then
+    resolve against that old package and fail on the first name the new
+    version added — ``cannot import name 'enable_caustics' from
+    '...blender_gala.scene'`` — which reads like a broken download and is
+    really a stale cache that a restart would have cleared.
+
+    Dropping them here means the imports that follow load from the files that
+    were just installed. On a first import there is nothing to drop and this
+    does nothing.
+    """
+    prefix = __name__ + "."
+    for name in [name for name in sys.modules if name.startswith(prefix)]:
+        del sys.modules[name]
+
+
+_drop_stale_submodules()
 
 # --- subpackages -----------------------------------------------------------
 from . import annotate, color, core, electrostatics, interactions, measure, pymol, scene

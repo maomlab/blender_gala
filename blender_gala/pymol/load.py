@@ -43,6 +43,8 @@ from ..core import mn as mn_bridge
 from ..core import units
 from ..measure.draw import draw_measurement
 from ..measure.measurements import Measurement
+from ..scene import lighting as gala_lighting
+from ..scene import materials as gala_materials
 from .session import PymolMolecule, PymolSession, read_session
 from .view import view_to_camera
 
@@ -66,6 +68,9 @@ STYLE_MAP = {
     "lines": ("StyleSticks", {"radius": 0.05}),
     "nonbonded": ("StyleSpheres", {"radius": 0.15}),
     "nb_spheres": ("StyleSpheres", {"radius": 0.25}),
+    # Not a PyMOL representation: what its sticks and spheres together mean.
+    # See `_style_plan`.
+    "ball_and_stick": ("StyleBallAndStick", {}),
 }
 
 #: Representations that are drawn some other way, so they are not "skipped".
@@ -86,6 +91,10 @@ class LoadedSession:
         The session as read, for anything the scene does not carry.
     measurements : list of Measurement
         Measurements recreated and drawn.
+    lights : list
+        The lights the rig created, if lighting was built.
+    materials : dict
+        Style name to material preset, per object name.
     skipped : list of str
         Things that did not come across, each with a reason.
     """
@@ -96,6 +105,8 @@ class LoadedSession:
     measurements: list[Measurement] = field(default_factory=list)
     labels: list[Any] = field(default_factory=list)
     camera: Any = None
+    lights: list[Any] = field(default_factory=list)
+    materials: dict[str, dict[str, str]] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -111,6 +122,12 @@ class LoadedSession:
             lines.append(f"  {len(self.measurements)} measurement(s) drawn")
         if self.labels:
             lines.append(f"  {len(self.labels)} label(s)")
+        if self.lights:
+            lines.append(f"  {len(self.lights)} light(s)")
+        for name, assigned in self.materials.items():
+            if assigned:
+                shown = ", ".join(f"{k}: {v}" for k, v in sorted(assigned.items()))
+                lines.append(f"  {name} materials: {shown}")
         for note in self.skipped:
             lines.append(f"  not converted: {note}")
         return "\n".join(lines)
@@ -126,6 +143,10 @@ def load_session(
     labels: bool = True,
     selections: bool = True,
     groups: bool = True,
+    lighting: str = "three_point",
+    materials: str | None = "chemistry",
+    light_energy: float = 1.0,
+    hdri: str = "studio",
     scale: float | None = None,
 ) -> LoadedSession:
     """Open a PyMOL session in Blender.
@@ -151,6 +172,21 @@ def load_session(
         it can be used as a style selection or in a node tree.
     groups : bool, optional
         Recreate PyMOL groups as collections.
+    lighting : {"three_point", "hdri", "both", "none"}, optional
+        Light the molecules once they are built. A session carries no lighting
+        of its own — PyMOL has none to carry — so without this the scene opens
+        correct and unlit, and every render of it is black.
+    materials : str or None, optional
+        Material scheme to assign, from
+        :data:`~blender_gala.scene.materials.MATERIAL_SCHEMES`. The presets
+        take their colour from the mesh, so the session's per-atom colours
+        survive; what they add is the surface quality that colour is shown on.
+        ``None`` leaves Molecular Nodes' own materials alone.
+    light_energy : float, optional
+        Brightness multiplier for the rig. Power is derived from the subject
+        size, so this is a taste knob.
+    hdri : str, optional
+        Which HDRI the ``hdri`` and ``both`` styles use.
     scale : float, optional
         Blender units per ångström. Defaults to Molecular Nodes' 0.01.
 
@@ -164,7 +200,14 @@ def load_session(
         If Molecular Nodes is not installed; it is what builds the molecules.
     PymolSessionError
         If the file cannot be read faithfully.
+    ValueError
+        If ``lighting`` is not one of the four styles.
     """
+    if lighting not in ("three_point", "hdri", "both", "none"):
+        raise ValueError(
+            "lighting must be 'three_point', 'hdri', 'both' or 'none', "
+            f"got {lighting!r}"
+        )
     module = _require_bpy()
     mn = mn_bridge.require_mn()
 
@@ -175,22 +218,30 @@ def load_session(
     for name, kind in session.unsupported:
         result.skipped.append(f"{name} ({kind})")
 
+    kept_atoms: dict[str, np.ndarray] = {}
     for molecule in session.molecules:
-        entity = _build_molecule(mn, molecule, state, result)
-        if entity is None:
+        built = _build_molecule(mn, molecule, state, result)
+        if built is None:
             continue
+        entity, kept = built
         result.molecules[molecule.name] = entity
+        kept_atoms[molecule.name] = kept
 
         if colors:
-            _apply_colors(session, molecule, entity)
+            _apply_colors(session, molecule, entity, kept)
         if selections:
-            _apply_selections(session, molecule, entity)
+            _apply_selections(session, molecule, entity, kept)
         if styles:
-            _apply_styles(mn, molecule, entity, result)
+            _apply_styles(mn, molecule, entity, kept, result)
         if molecule.matrix is not None:
             _apply_transform(module, entity, molecule.matrix, scale)
         entity.object.hide_render = not molecule.visible
         entity.object.hide_viewport = not molecule.visible
+
+    if materials is not None:
+        _assign_materials(result, materials)
+    if lighting != "none":
+        _build_lighting(result, lighting, light_energy, hdri)
 
     if groups:
         _apply_groups(module, session, result)
@@ -199,7 +250,7 @@ def load_session(
     if measurements:
         _draw_measurements(session, result, scale)
     if labels:
-        _draw_labels(session, result, scale)
+        _draw_labels(session, result, kept_atoms, scale)
 
     return result
 
@@ -211,8 +262,16 @@ def load_session(
 
 def _build_molecule(
     mn: Any, molecule: PymolMolecule, state: int, result: LoadedSession
-) -> Any:
-    """Hand one object to Molecular Nodes as a structure file."""
+) -> tuple[Any, np.ndarray] | None:
+    """Hand one object to Molecular Nodes as a structure file.
+
+    Returns the entity together with a boolean mask over the *session's* atoms
+    saying which of them the entity actually has, because the two need not be
+    the same length: a session can hold atoms it has no coordinates for, and
+    those cannot be built. Everything indexed per atom afterwards — colours,
+    representations, selections, labels — has to be narrowed by that mask, or
+    it is silently the wrong length and does nothing at all.
+    """
     try:
         array = molecule.to_atom_array(state if molecule.n_states > 1 else 0)
     except Exception as exc:
@@ -225,8 +284,13 @@ def _build_molecule(
         return None
     if not finite.all():
         # An atom with no position in this state cannot be given one; keeping
-        # it would put it at the origin and drag every bond towards it.
+        # it would put it at the origin and drag every bond towards it. Say so
+        # rather than quietly returning a smaller molecule than was asked for.
         array = array[finite]
+        result.skipped.append(
+            f"{molecule.name}: {int((~finite).sum())} atom(s) the session has "
+            f"no coordinates for in state {state}"
+        )
 
     with tempfile.TemporaryDirectory() as workdir:
         for suffix, writer in ((".cif", _write_cif), (".pdb", _write_pdb)):
@@ -254,12 +318,12 @@ def _build_molecule(
             if _atom_count(entity) == len(array):
                 _restore_annotations(entity, array)
                 _restore_secondary_structure(entity, molecule, finite)
-                return entity
+                return entity, finite
             result.skipped.append(
                 f"{molecule.name} styles/colours "
                 f"(Molecular Nodes read {_atom_count(entity)} of {len(array)} atoms)"
             )
-            return entity
+            return entity, np.zeros(molecule.n_atoms, dtype=bool)
 
     result.skipped.append(f"{molecule.name} (could not be written for import)")
     return None
@@ -369,7 +433,9 @@ def _safe_name(name: str) -> str:
     return "".join(keep) or "object"
 
 
-def _apply_colors(session: PymolSession, molecule: PymolMolecule, entity: Any) -> None:
+def _apply_colors(
+    session: PymolSession, molecule: PymolMolecule, entity: Any, kept: np.ndarray
+) -> None:
     """Write the session's per-atom colours onto the mesh.
 
     PyMOL's colour values are display values — what ``set_color`` takes and
@@ -377,7 +443,7 @@ def _apply_colors(session: PymolSession, molecule: PymolMolecule, entity: Any) -
     across unconverted they come out washed out, so the conversion happens
     here, at the boundary, as it does for every other colour Gala writes.
     """
-    colors = session.atom_colors(molecule)
+    colors = session.atom_colors(molecule)[kept]
     if len(colors) != _atom_count(entity):
         return
     colors[:, :3] = colormaps.srgb_to_linear(colors[:, :3])
@@ -385,33 +451,44 @@ def _apply_colors(session: PymolSession, molecule: PymolMolecule, entity: Any) -
 
 
 def _apply_selections(
-    session: PymolSession, molecule: PymolMolecule, entity: Any
+    session: PymolSession, molecule: PymolMolecule, entity: Any, kept: np.ndarray
 ) -> None:
-    """Store each named selection as a boolean attribute."""
+    """Store each named selection as a boolean attribute.
+
+    A selection indexes the session's atoms, so it is built at that length and
+    then narrowed to the atoms the molecule was actually built from.
+    """
     for selection in session.selections:
         indices = selection.members.get(molecule.name)
         if indices is None:
             continue
-        mask = np.zeros(_atom_count(entity), dtype=bool)
-        inside = indices[(indices >= 0) & (indices < len(mask))]
-        mask[inside] = True
+        full = np.zeros(len(kept), dtype=bool)
+        full[indices[(indices >= 0) & (indices < len(full))]] = True
+        mask = full[kept]
+        if len(mask) != _atom_count(entity):
+            continue
         _store_mask(entity, _attribute_name(selection.name), mask)
 
 
 def _apply_styles(
-    mn: Any, molecule: PymolMolecule, entity: Any, result: LoadedSession
+    mn: Any,
+    molecule: PymolMolecule,
+    entity: Any,
+    kept: np.ndarray,
+    result: LoadedSession,
 ) -> None:
-    """Add one Molecular Nodes style per representation that was shown."""
-    for rep in molecule.reps_present():
-        if rep in _HANDLED_ELSEWHERE:
-            continue
+    """Add a Molecular Nodes style for each group of atoms shown together."""
+    n_atoms = _atom_count(entity)
+    for rep, mask in _style_plan(molecule, kept):
         mapped = STYLE_MAP.get(rep)
         if mapped is None:
             result.skipped.append(f"{molecule.name}: {rep} representation")
             continue
-
-        mask = molecule.rep_mask(rep)
-        if len(mask) != _atom_count(entity) or not mask.any():
+        if len(mask) != n_atoms:  # pragma: no cover - guarded by the caller
+            result.skipped.append(
+                f"{molecule.name}: {rep} representation "
+                f"({len(mask)} flags for {n_atoms} atoms)"
+            )
             continue
 
         style_name, options = mapped
@@ -429,6 +506,39 @@ def _apply_styles(
         # are already there, and MN's own colour generator would overwrite it.
         entity.add_style(style_class(**options), color=None, selection=selection)
         result.styles.setdefault(molecule.name, []).append(rep)
+
+
+def _style_plan(
+    molecule: PymolMolecule, kept: np.ndarray
+) -> list[tuple[str, np.ndarray]]:
+    """Group the atoms by the style each should get.
+
+    Mostly one representation to one style, with one combination worth
+    recognising: PyMOL has no ball-and-stick representation. It draws sticks
+    and spheres over the same atoms and shrinks the spheres, so an object that
+    reads as ball-and-stick arrives here as two overlapping masks. Molecular
+    Nodes *does* have the style, and one of those beats two styles fighting
+    over the same atoms.
+    """
+    present = [rep for rep in molecule.reps_present() if rep not in _HANDLED_ELSEWHERE]
+    masks = {rep: molecule.rep_mask(rep)[kept] for rep in present}
+
+    round_atoms = np.zeros(int(kept.sum()), dtype=bool)
+    for rep in ("spheres", "nb_spheres"):
+        if rep in masks:
+            round_atoms |= masks[rep]
+
+    plan: list[tuple[str, np.ndarray]] = []
+    sticks = masks.get("sticks")
+    both = round_atoms & sticks if sticks is not None else round_atoms & False
+    if both.any():
+        plan.append(("ball_and_stick", both))
+        for rep in ("sticks", "spheres", "nb_spheres"):
+            if rep in masks:
+                masks[rep] = masks[rep] & ~both
+
+    plan.extend((rep, masks[rep]) for rep in present if masks[rep].any())
+    return plan
 
 
 def _store_mask(entity: Any, name: str, mask: np.ndarray) -> None:
@@ -479,6 +589,64 @@ def _apply_groups(module: Any, session: PymolSession, result: LoadedSession) -> 
 
 
 # ---------------------------------------------------------------------------
+# Making the scene renderable
+# ---------------------------------------------------------------------------
+
+
+def _assign_materials(result: LoadedSession, scheme: str) -> None:
+    """Give each molecule's styles the materials the scheme calls for.
+
+    The presets read colour from the mesh, so this does not overwrite what the
+    session painted; it decides how that colour is *shown* — a cartoon matte
+    and slightly translucent, a ligand glossier, a surface softer.
+    """
+    for name, entity in result.molecules.items():
+        try:
+            assigned = gala_materials.assign_materials(entity, scheme=scheme)
+        except Exception as exc:
+            result.skipped.append(f"{name} materials ({exc})")
+            continue
+        result.materials[name] = assigned
+
+
+def _build_lighting(
+    result: LoadedSession, style: str, energy: float, hdri: str
+) -> None:
+    """Light the molecules that were built.
+
+    Sized from the molecules rather than from everything visible, and built
+    before the measurements and labels are drawn, so a label standing off to
+    one side does not push the whole rig outwards.
+    """
+    subjects = list(result.molecules.values())
+    if not subjects:
+        return
+
+    if style in ("three_point", "both"):
+        rig = gala_lighting.three_point_lighting(
+            subjects[0] if len(subjects) == 1 else None, energy=energy
+        )
+        result.lights.extend(_lights_of(rig))
+
+    if style in ("hdri", "both"):
+        try:
+            gala_lighting.hdri_lighting(hdri, strength=0.3 if style == "both" else 1.0)
+        except FileNotFoundError as exc:
+            result.skipped.append(f"HDRI lighting ({exc})")
+
+
+def _lights_of(rig: Any) -> list[Any]:
+    """The lights under the rig empty ``three_point_lighting`` returns."""
+    if rig is None:  # pragma: no cover - the rig is always built
+        return []
+    return [
+        child
+        for child in getattr(rig, "children", ())
+        if getattr(child, "type", "") == "LIGHT"
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Measurements and labels
 # ---------------------------------------------------------------------------
 
@@ -505,13 +673,22 @@ def _draw_measurements(
                     measurement,
                     target=target,
                     label_avoid_occlusion=False,
+                    # Sized to the frame rather than to the molecule: a
+                    # session's view is as often two angstrom from a contact
+                    # as it is across a whole complex.
+                    label_size=None,
                     scale=scale,
                 )
             )
             result.measurements.append(measurement)
 
 
-def _draw_labels(session: PymolSession, result: LoadedSession, scale: float) -> None:
+def _draw_labels(
+    session: PymolSession,
+    result: LoadedSession,
+    kept_atoms: dict[str, np.ndarray],
+    scale: float,
+) -> None:
     """Recreate PyMOL's atom labels as Gala label objects.
 
     PyMOL labels carry their own text — often something the user typed rather
@@ -524,8 +701,13 @@ def _draw_labels(session: PymolSession, result: LoadedSession, scale: float) -> 
         entity = result.molecules.get(molecule.name)
         if entity is None or not len(molecule.label):
             continue
+        kept = kept_atoms.get(molecule.name)
+        if kept is None or len(kept) != len(molecule.label):
+            continue
         n_atoms = _atom_count(entity)
-        for index, text in enumerate(molecule.label):
+        # Labels are indexed against the atoms that were built, not against
+        # the session's, which can be more.
+        for index, text in enumerate(molecule.label[kept]):
             text = str(text).strip()
             if not text or index >= n_atoms:
                 continue
