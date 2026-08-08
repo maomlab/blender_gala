@@ -142,3 +142,36 @@ consistent with each other between runs.
 2. `make check`
 3. `make build` and test the resulting zip in a clean Blender.
 4. Tag and push; CI attaches the extension zip to the release.
+
+## Publishing to extensions.blender.org
+
+The manifest already satisfies the platform's upload checks — its validator
+requires, for an add-on specifically, that `license` include
+`SPDX:GPL-3.0-or-later`, that every tag be a known add-on tag, that `tagline`
+be at most 64 characters and end without punctuation, and that each
+`permissions` entry pair a known slug (`files`, `network`, `microphone`,
+`camera`) with a reason under the same rules.
+
+Before submitting:
+
+1. `make build`, and install the zip in a clean Blender to confirm it
+   registers.
+2. `make listing` composes the preview images into `docs/images/listing/`.
+   The platform renders previews as 16:9 and every figure here is square, so
+   they are fitted onto that canvas rather than left to be letterboxed.
+   Upload them under *Manage → Edit → Preview images*.
+3. Say in the submission notes what a reviewer will notice anyway: the
+   electrostatics feature runs APBS as a **subprocess** (user-initiated,
+   nothing bundled or downloaded), and loading a `.pse` **unpickles** it,
+   which is why the reader refuses every global outside a seven-name
+   allowlist.
+
+One thing to settle first. The manual says an add-on must be
+[self-contained](https://docs.blender.org/manual/en/latest/advanced/extensions/addons.rst)
+and bundle its dependencies. Gala deliberately does not: it uses the biotite,
+databpy and scipy that Molecular Nodes ships, because duplicating them would
+mean a second copy of ~150 MB of wheels and two versions of biotite on
+`sys.path` (SPECIFICATION D-1). Scene-level features work without Molecular
+Nodes and molecule-level ones raise a clear error, but whether that counts as
+self-contained is the reviewer's call, and worth asking before submitting
+rather than after.

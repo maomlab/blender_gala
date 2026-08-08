@@ -4,10 +4,14 @@ id = "blender_gala"
 version = "0.1.0"
 name = "Blender Gala"
 tagline = "Publication figures and measurements for structural biology"
-maintainer = "Blender Gala contributors"
+maintainer = "Matthew O'Meara <maom@umich.edu>"
 type = "add-on"
 
-website = "https://github.com/maomlab/blender_gala"
+website = "https://maomlab.github.io/blender_gala"
+
+# Where a user reports a problem. Optional, and the first thing someone looks
+# for when the add-on misbehaves.
+support = "https://github.com/maomlab/blender_gala/issues"
 
 tags = ["Render", "Scene", "Lighting", "Material"]
 

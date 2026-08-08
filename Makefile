@@ -232,6 +232,13 @@ window-shot: check-blender ## Recapture the whole-window shot the hero is built 
 hero: ## Compose the front page hero into docs/images/hero.png
 	$(PYTHON) scripts/make_hero.py
 
+# The extensions platform renders previews as 16:9; every figure here is
+# square or nearly so, so they are fitted onto that canvas rather than left
+# for the platform to letterbox however it likes.
+.PHONY: listing
+listing: ## Compose the extensions.blender.org preview images
+	$(PYTHON) scripts/make_listing_images.py
+
 # ---------------------------------------------------------------------------
 # Packaging
 # ---------------------------------------------------------------------------

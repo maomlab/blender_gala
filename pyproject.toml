@@ -9,7 +9,7 @@ description = "Tools to support using Blender for structural biology visualizati
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
-authors = [{ name = "Blender Gala contributors" }]
+authors = [{ name = "Matthew O'Meara", email = "maom@umich.edu" }]
 keywords = ["blender", "structural-biology", "molecular-nodes", "visualization"]
 classifiers = [
     "Intended Audience :: Science/Research",
