@@ -7,7 +7,7 @@
 [![Documentation](https://img.shields.io/badge/docs-maomlab.github.io%2Fblender__gala-0b7285?logo=materialformkdocs&logoColor=white)](https://maomlab.github.io/blender_gala/)
 [![CI](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml/badge.svg)](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml)
 [![Blender 5.1+](https://img.shields.io/badge/Blender-5.1%2B-ea7600?logo=blender&logoColor=white)](https://www.blender.org)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](https://www.gnu.org/licenses/gpl-3.0.html)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 Guides, the full API reference and every vignette are on the
 **[documentation site](https://maomlab.github.io/blender_gala/)** —
@@ -245,7 +245,15 @@ scripting figures for a paper.
 
 ## Licence
 
-GPL-3.0-or-later, matching Blender and Molecular Nodes.
+[Apache-2.0](LICENSE).
+
+Blender itself is GPL, and the Blender Foundation's position is that a Python
+add-on using `bpy` is a derivative work that has to be distributed under a
+GPL-compatible licence. Apache-2.0 is compatible with GPL-3.0 in that
+direction — Apache-2.0 code may be combined into a GPL-3.0 work — so a
+distribution of Gala together with Blender remains GPL-3.0. Anyone
+redistributing it should read both licences rather than take a README's word
+for it.
 
 ## Acknowledgements
 
