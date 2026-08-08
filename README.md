@@ -142,7 +142,7 @@ Building from source:
 ```bash
 git clone https://github.com/maomlab/blender_gala
 cd blender_gala
-make build     # -> dist/blender_gala-0.1.0.zip
+make build     # -> dist/blender_gala-0.2.0.zip
 make install   # build and install into your Blender
 ```
 
@@ -240,7 +240,7 @@ working.
 
 ## Status
 
-Version 0.1.0. The API is settling but not yet frozen; pin a version if you are
+Version 0.2.0. The API is settling but not yet frozen; pin a version if you are
 scripting figures for a paper.
 
 ## Licence

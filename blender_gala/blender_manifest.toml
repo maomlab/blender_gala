@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "blender_gala"
-version = "0.1.0"
+version = "0.2.0"
 name = "Blender Gala"
 tagline = "Publication figures and measurements for structural biology"
 maintainer = "Matthew O'Meara <maom@umich.edu>"
