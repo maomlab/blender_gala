@@ -2,6 +2,17 @@
 
 **Structural biology visualization tools for Blender.**
 
+### 📖 [**Read the documentation**](https://maomlab.github.io/blender_gala/)
+
+[![Documentation](https://img.shields.io/badge/docs-maomlab.github.io%2Fblender__gala-0b7285?logo=materialformkdocs&logoColor=white)](https://maomlab.github.io/blender_gala/)
+[![CI](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml/badge.svg)](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml)
+[![Blender 5.1+](https://img.shields.io/badge/Blender-5.1%2B-ea7600?logo=blender&logoColor=white)](https://www.blender.org)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](https://www.gnu.org/licenses/gpl-3.0.html)
+
+Guides, the full API reference and every vignette are on the
+**[documentation site](https://maomlab.github.io/blender_gala/)** —
+start with [Getting started](https://maomlab.github.io/blender_gala/guide/getting-started.html).
+
 ![The Gala sidebar open in Blender, with arrows to the figures it produces:
 publication scenes, interactions, measurements, colouring by data, compositing
 passes and animation](docs/images/hero.png)
@@ -180,11 +191,19 @@ gala.render("figure.png")
 
 ## Documentation
 
+**<https://maomlab.github.io/blender_gala/>**
+
 - [Getting started](https://maomlab.github.io/blender_gala/guide/getting-started.html)
 - [Selection language reference](https://maomlab.github.io/blender_gala/guide/selections.html)
 - [Publication scenes](https://maomlab.github.io/blender_gala/guide/scenes.html)
-- [Interactions and measurement](https://maomlab.github.io/blender_gala/guide/interactions.html)
+- [Interactions](https://maomlab.github.io/blender_gala/guide/interactions.html)
+  and [measurement](https://maomlab.github.io/blender_gala/guide/measurement.html)
 - [Colouring by data](https://maomlab.github.io/blender_gala/guide/colouring.html)
+- [Electrostatics](https://maomlab.github.io/blender_gala/guide/electrostatics.html)
+- [PyMOL sessions](https://maomlab.github.io/blender_gala/guide/pymol.html)
+- [Compositing and passes](https://maomlab.github.io/blender_gala/guide/compositing.html)
+- [The Blender UI](https://maomlab.github.io/blender_gala/guide/ui.html)
+- [Vignettes](https://maomlab.github.io/blender_gala/vignettes.html)
 - [API reference](https://maomlab.github.io/blender_gala/api/index.html)
 
 Runnable end-to-end examples live in [`vignettes/`](vignettes/); CI executes
