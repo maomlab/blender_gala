@@ -73,9 +73,28 @@ core comes out dark blue and its disordered arms orange.
 
 ![05_compositing_passes](images/05_compositing_passes.png)
 
-`05_compositing_passes.py` — enable cryptomatte and Z, render to a multilayer
-EXR, and set up depth of field and depth cueing so the figure can be adjusted
-after the render.
+`05_compositing_passes.py` — haemoglobin rendered once, cut into four figures.
+A talk needs the same picture with a different subunit carrying the argument
+each time, and rendering it once per slide is three more chances for the
+lighting or the framing to drift. So the vignette gives each chain its own
+material — which is what lets cryptomatte tell them apart inside a single
+Molecular Nodes object — enables the passes, and writes the render to a
+multilayer EXR alongside the picture.
+
+Everything after that is compositing. The alpha-subunit figure above, the beta
+one and the heme one are all cut from that one render by
+`highlight_matte`, in a scene with no molecule, no lights and no camera in it:
+every pixel comes out of the EXR, and each figure costs a fraction of a second
+rather than another pass through Cycles.
+
+| The render | Beta subunits | The hemes |
+| --- | --- | --- |
+| ![The render, all four chains coloured](images/05_compositing_beauty.png) | ![The beta subunits highlighted](images/05_compositing_beta.png) | ![The hemes highlighted](images/05_compositing_heme.png) |
+
+It also sets up depth of field, and renders the one variant that cannot be done
+after the fact — depth cueing, which needs the Z pass at render time. The
+[compositing guide](guide/compositing.md) shows the node graphs behind all of
+it.
 
 ## 6. A turntable
 

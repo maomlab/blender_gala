@@ -16,7 +16,7 @@ supported Blender is 5.1.
 
 from __future__ import annotations
 
-import contextlib
+import math
 import os
 import warnings
 from typing import Any
@@ -35,12 +35,24 @@ __all__ = [
     "depth_cue",
     "depth_of_field",
     "enable_passes",
+    "highlight_matte",
     "set_exr_output",
     "setup_compositor",
 ]
 
 _GALA_PREFIX = "GALA "
 _RENDER_LAYERS = "GALA Render Layers"
+
+#: Nodes :func:`highlight_matte` owns. Prefixed so re-running replaces them
+#: rather than stacking another knock-back on top of the last one.
+_HIGHLIGHT_PREFIX = "GALA Highlight"
+
+#: What the ``layer`` argument of :func:`highlight_matte` names.
+_CRYPTO_LAYERS = {
+    "object": "CryptoObject",
+    "material": "CryptoMaterial",
+    "asset": "CryptoAsset",
+}
 
 
 def _require_bpy() -> Any:
@@ -426,13 +438,209 @@ def _add_cryptomatte_nodes(tree: Any, render_layers: Any, scene: Any) -> list[An
             continue
         node.source = "RENDER"
         node.scene = scene
-        # The layer_name enum is only populated once the passes exist in a
-        # render result; until then the node defaults to the object layer.
-        with contextlib.suppress(TypeError):
-            node.layer_name = layer
+        _set_crypto_layer(node, layer, scene)
         tree.links.new(render_layers.outputs["Image"], node.inputs["Image"])
         nodes.append(node)
     return nodes
+
+
+# ---------------------------------------------------------------------------
+# Using the mattes
+# ---------------------------------------------------------------------------
+
+
+def _set_crypto_layer(node: Any, layer: str, scene: Any = None) -> str | None:
+    """Point a Cryptomatte node at the ``CryptoObject``/``Material``/``Asset`` layer.
+
+    The identifiers are qualified by the name of the view layer that produced
+    them — ``ViewLayer.CryptoMaterial``, and whatever the user renamed it to if
+    they did. That enum is generated at draw time from the node's source, so it
+    cannot be read back through ``bl_rna`` (which reports the unqualified
+    names); the only way to find out what it accepts is to try. Callers may
+    pass a fully qualified name to skip the guessing.
+
+    Returns
+    -------
+    str or None
+        The identifier that was accepted, or ``None`` if none were.
+    """
+    candidates = [layer]
+    if scene is not None:
+        candidates += [f"{view_layer.name}.{layer}" for view_layer in scene.view_layers]
+    candidates.append(f"ViewLayer.{layer}")
+
+    for candidate in dict.fromkeys(candidates):
+        try:
+            node.layer_name = candidate
+        except TypeError:
+            continue
+        return candidate
+
+    # An unrendered scene has no cryptomatte layers to offer yet, so the node
+    # keeps its default — the object layer — until there is a render result.
+    return None
+
+
+def _highlight_base(tree: Any, output: Any, doomed: list[Any]) -> Any | None:
+    """Return the socket a rebuilt highlight should knock back.
+
+    That is whatever currently feeds the output — except when the output is fed
+    by an earlier highlight, in which case it is the image that highlight was
+    given, recovered from the untouched side of its mix. Sockets belonging to
+    nodes that are about to be removed are no use to anyone, so they come back
+    as ``None`` and the caller falls back to the render layers.
+    """
+    links = output.inputs[0].links
+    if not links:
+        return None
+
+    socket = links[0].from_socket
+    node = links[0].from_node
+    if node.name.startswith(_HIGHLIGHT_PREFIX):
+        colours = _typed_sockets(node.inputs, "RGBA")
+        inner = colours[1].links if len(colours) > 1 else ()
+        if not inner:
+            return None
+        socket, node = inner[0].from_socket, inner[0].from_node
+
+    return None if node in doomed else socket
+
+
+def highlight_matte(
+    matte: str | list[str] | tuple[str, ...],
+    layer: str = "material",
+    source: str | None = None,
+    dim: float = 0.75,
+    desaturate: float = 0.9,
+    scene: Any = None,
+) -> Any:
+    """Knock everything back except one cryptomatte selection.
+
+    This is what the passes were for: the chain, ligand or subunit named by
+    ``matte`` keeps its colour and brightness, and the rest of the frame is
+    darkened and drained of colour so it reads as context. Nothing about the
+    3D scene changes, so the same render can be re-cut for as many figures or
+    slides as the talk needs.
+
+    With ``source`` it does that without rendering again at all: the image and
+    its mattes are read from a multilayer EXR, so a scene with no molecule in
+    it is enough to produce the picture.
+
+    Parameters
+    ----------
+    matte : str or sequence of str
+        What to keep. Object names for ``layer="object"``, material names for
+        ``layer="material"`` — a Cryptomatte node's "pick" in the UI writes the
+        same strings.
+    layer : {"material", "object", "asset"}, optional
+        Which cryptomatte layer to match ``matte`` against. Material is the
+        useful one for molecules: Molecular Nodes puts a whole structure in one
+        object, so per-chain mattes come from giving each chain's style its own
+        material.
+    source : str, optional
+        Path to a multilayer EXR to composite from, such as the one
+        :func:`set_exr_output` wrote. When omitted the current scene's render
+        layers are used, and the highlight applies to the next render.
+    dim : float, optional
+        How far to darken everything else, ``0`` unchanged to ``1`` black.
+    desaturate : float, optional
+        How much colour to drain from everything else, ``0`` unchanged to
+        ``1`` fully grey.
+    scene : bpy.types.Scene, optional
+        Scene to configure.
+
+    Returns
+    -------
+    bpy.types.NodeTree
+        The compositor node tree.
+
+    Raises
+    ------
+    ValueError
+        If ``matte`` is empty, ``layer`` is not a cryptomatte layer, or ``dim``
+        or ``desaturate`` is outside 0-1.
+    FileNotFoundError
+        If ``source`` does not exist.
+    """
+    bpy_mod = _require_bpy()
+    scene = scene or bpy_mod.context.scene
+
+    names = [matte] if isinstance(matte, str) else list(matte)
+    names = [name for name in names if name]
+    if not names:
+        raise ValueError("highlight_matte needs at least one matte name")
+    if layer not in _CRYPTO_LAYERS:
+        raise ValueError(
+            f"unknown cryptomatte layer {layer!r}; choose from {sorted(_CRYPTO_LAYERS)}"
+        )
+    for label, value in (("dim", dim), ("desaturate", desaturate)):
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"{label} must be between 0 and 1, got {value}")
+    if source is not None and not os.path.exists(source):
+        raise FileNotFoundError(f"no such EXR to composite from: {source}")
+
+    tree = _compositor_tree(scene)
+    output = _output_node(tree)
+
+    doomed = [node for node in tree.nodes if node.name.startswith(_HIGHLIGHT_PREFIX)]
+    base = _highlight_base(tree, output, doomed)
+    for node in doomed:
+        tree.nodes.remove(node)
+
+    # Laid out to the right of, and above, whatever `setup_compositor` built,
+    # so a highlight added on top of the standard chain reads as a stage rather
+    # than as nodes dropped on the ones already there.
+    image = None
+    if source is not None:
+        node = _new(tree, "CompositorNodeImage", "Highlight Source", (-1000, 300))
+        if node is None:  # pragma: no cover - the node type exists in 5.1+
+            return tree
+        image = bpy_mod.data.images.load(source, check_existing=True)
+        node.image = image
+        # A multilayer EXR's Combined pass; the socket is named for the pass
+        # rather than "Image", and is the first one either way.
+        base = node.outputs.get("Image") or node.outputs[0]
+    elif base is None:
+        enable_passes(cryptomatte=True, view_layer=scene_view_layer(scene))
+        base = _render_layers_node(tree, scene).outputs["Image"]
+
+    crypto = _new(tree, "CompositorNodeCryptomatteV2", "Highlight Matte", (300, -150))
+    darken = _new(tree, "CompositorNodeExposure", "Highlight Dim", (300, 250))
+    grey = _new(tree, "CompositorNodeHueSat", "Highlight Desaturate", (550, 250))
+    mix = _new(tree, "ShaderNodeMix", "Highlight Mix", (850, 250))
+    if crypto is None or darken is None or grey is None or mix is None:
+        return tree
+    output.location = (max(output.location[0], 1200), output.location[1])
+
+    if image is not None:
+        crypto.source = "IMAGE"
+        crypto.image = image
+    else:
+        crypto.source = "RENDER"
+        crypto.scene = scene
+    _set_crypto_layer(crypto, _CRYPTO_LAYERS[layer], scene)
+    crypto.matte_id = ", ".join(names)
+    tree.links.new(base, crypto.inputs["Image"])
+
+    # Stops rather than a multiplier, because that is what the node takes:
+    # dim=0.75 keeps a quarter of the light, which is two stops down.
+    darken.inputs["Exposure"].default_value = (
+        math.log2(1.0 - dim) if dim < 1.0 else -12.0
+    )
+    tree.links.new(base, darken.inputs["Image"])
+
+    grey.inputs["Saturation"].default_value = 1.0 - desaturate
+    tree.links.new(darken.outputs["Image"], grey.inputs["Image"])
+
+    mix.data_type = "RGBA"
+    mix.blend_type = "MIX"
+    factor, knocked_back, kept, result = _mix_sockets(mix)
+    tree.links.new(crypto.outputs["Matte"], factor)
+    tree.links.new(grey.outputs["Image"], knocked_back)
+    tree.links.new(base, kept)
+    tree.links.new(result, output.inputs[0])
+
+    return tree
 
 
 def add_file_output(

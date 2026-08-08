@@ -220,6 +220,13 @@ turntable: check-blender ## Render the turntable animation into docs/images
 ui-shots: check-blender ## Recapture the sidebar screenshots in docs/images/ui
 	BLENDER="$(BLENDER)" $(PYTHON) scripts/capture_ui.py
 
+# Opens a window for the same reason `ui-shots` does. The highlight graph reads
+# its matte out of the EXR vignette 5 writes, so run `make vignettes` first for
+# a shot with a real material picked in it.
+.PHONY: compositor-shots
+compositor-shots: check-blender ## Recapture the node graphs in docs/images/compositor
+	BLENDER="$(BLENDER)" $(PYTHON) scripts/capture_compositor.py
+
 # Opens a Blender window, like `ui-shots`, and for the same reason: a
 # screenshot is a picture of the framebuffer, which `--background` never fills.
 .PHONY: window-shot

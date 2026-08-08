@@ -14,6 +14,7 @@ from .compositing import (
     depth_cue,
     depth_of_field,
     enable_passes,
+    highlight_matte,
     set_exr_output,
     setup_compositor,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "get_material",
     "get_preset",
     "hdri_lighting",
+    "highlight_matte",
     "lighting",
     "list_hdris",
     "materials",

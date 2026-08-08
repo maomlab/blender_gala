@@ -69,7 +69,11 @@ it" to "render this and put it in a paper":
   material-level ambient occlusion darkens the crevices between atoms.
 - **Cryptomatte and Z passes** written to a multilayer EXR, so you can brighten
   just the ligand *after* a 40-minute render instead of starting over.
-  Depth of field and PyMOL-style depth cueing are one argument each.
+  `highlight_matte()` cuts the figure again straight from that EXR — one chain
+  kept, the rest darkened and drained of colour — in a scene with no molecule
+  in it, so a talk that needs the same picture three times with a different
+  subunit emphasised each time costs one render rather than three. Depth of
+  field and PyMOL-style depth cueing are one argument each.
 
 ### Measuring and annotating
 

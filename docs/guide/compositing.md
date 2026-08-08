@@ -1,8 +1,70 @@
 # Compositing and passes
 
-The point of setting up cryptomatte *before* rendering is that it lets you
-change your mind afterwards — brighten just the ligand, knock back one chain,
-pull a matte for a figure inset — without re-rendering a 40-minute image.
+## What compositing is
+
+A render does not have to be one image. Cycles can be asked to write, alongside
+the picture, several other pictures of the same frame: how far every pixel was
+from the camera, which way its surface faced, and which object and material it
+came from. Those are the **render passes**, and *compositing* is the step that
+takes them and assembles the final image — brighten this, blur that, fade the
+back of the scene, put the two together.
+
+Blender has a compositor built in, and it runs after Cycles finishes. That
+timing is the whole point: anything done in the compositor can be changed and
+looked at again in a second, whereas anything baked into the 3D scene means
+another full render.
+
+For a molecular figure the useful consequence is that decisions you would
+normally have to make *before* a 40-minute render — which chain the figure is
+about, how much of the background to keep, where the focus falls — become
+decisions you make *after* it, from the same render, as many times as the
+figure needs.
+
+## What cryptomatte is
+
+A matte is a per-pixel mask: white where the thing you want is, black
+elsewhere, and something in between at the edges where the pixel was only
+partly covered. Given a matte you can treat one part of a finished image
+differently from the rest.
+
+**Cryptomatte** is how a renderer hands you those masks for everything in the
+scene at once, without deciding in advance what you will want. During the
+render, Cycles records for each pixel which objects, materials and assets
+contributed to it and by how much — several such *ranks* per pixel, which is
+what lets it get thin, semi-transparent and anti-aliased edges right rather
+than stair-stepping them. The names are stored as hashes plus a manifest that
+maps them back, so afterwards you can ask for "the pixels that came from *this*
+material" by name and get a clean, edge-accurate matte for it.
+
+Three layers are written, and which one you want depends on how the scene is
+built:
+
+| Layer | Selects by | Use it when |
+| --- | --- | --- |
+| `CryptoObject` | Blender object name | Separating a molecule from another molecule, or from measurement geometry |
+| `CryptoMaterial` | material name | Separating parts *within* one molecule — chains, ligand, site |
+| `CryptoAsset` | asset name | Grouping several objects under one name |
+
+!!! important "One molecule is one object"
+
+    Molecular Nodes puts an entire structure — every chain, every ligand — in a
+    single Blender object, so `CryptoObject` cannot tell one chain from
+    another: they are all the same object. Per-chain mattes come from the
+    material layer, which means each chain has to be drawn by its own style
+    with its own material:
+
+    ```python
+    mask = gala.select(mol, "chain A")
+    mol.store_named_attribute(          # styles select by named attribute
+        mask, name="chain_A",
+        atype=databpy.AttributeTypes.BOOLEAN,
+        domain=databpy.AttributeDomains.POINT,
+    )
+    material = gala.scene.materials.build_material("protein", name="GALA alpha 1")
+    mol.add_style("cartoon", selection="chain_A", material=material)
+    ```
+
+    Vignette 5 does exactly this for the four chains of haemoglobin.
 
 ## Passes
 
@@ -33,6 +95,10 @@ gala.setup_compositor(
 )
 ```
 
+![The node graph setup_compositor builds: render layers into denoise into the
+output, three cryptomatte pickers, and a file output node with a slot per
+pass](../images/compositor/chain.png)
+
 Every node Gala adds is named with a `GALA` prefix and removed before
 rebuilding, so calling this repeatedly rewires rather than accumulating
 duplicates. Nodes you added yourself are left alone.
@@ -49,6 +115,12 @@ shows up as a failure rather than a silently skipped step.
 but does not link one to the output. Connecting one would matte the beauty
 pass, which defeats the point of shipping mattes.
 
+Each is already pointed at its own layer, so the one labelled *CryptoMaterial*
+matches material names. To pick interactively, put the render in the backdrop
+and use the node's eyedropper: clicking a chain writes its material name into
+*Matte ID*, which is the same string you would pass to
+[`highlight_matte`](#highlighting-one-part-of-a-finished-render) in a script.
+
 ## Writing the passes
 
 ```python
@@ -57,7 +129,10 @@ gala.setup_compositor(cryptomatte=True, file_output="passes/")
 
 adds a File Output node writing a **32-bit multilayer EXR** with Image, Depth,
 Normal and every cryptomatte layer. That is the format Nuke, Fusion, Krita and
-Blender's own compositor read cryptomatte from; a PNG cannot carry it.
+Blender's own compositor read cryptomatte from; a PNG cannot carry it. The
+manifest that maps the hashes back to names travels in the file, so the mattes
+are still selectable by name on another machine, in another application, a year
+later.
 
 Alternatively, make the render output itself a multilayer EXR, which captures
 every enabled pass without needing a File Output node:
@@ -66,6 +141,63 @@ every enabled pass without needing a File Output node:
 gala.scene.set_exr_output("render/figure.exr")
 gala.render()
 ```
+
+## Highlighting one part of a finished render
+
+`highlight_matte` builds the graph that a matte is *for*: the named chain,
+ligand or subunit keeps its colour and brightness, and everything else is
+darkened and drained of colour so it reads as context.
+
+```python
+gala.highlight_matte("GALA alpha 1", layer="material")
+```
+
+Point it at an EXR and it does that without rendering anything again — the
+image and its mattes are both read from the file, so a scene with no molecule
+in it is enough to produce the picture:
+
+```python
+gala.highlight_matte(
+    ["GALA beta 1", "GALA beta 2"],
+    source="passes/gala.exr",
+    dim=0.75,        # how far the rest is darkened, 0-1
+    desaturate=0.9,  # how much colour it loses, 0-1
+)
+```
+
+![The highlight node graph: the EXR feeding a cryptomatte node and an
+exposure-and-saturation pair, mixed together by the matte](../images/compositor/highlight.png)
+
+The nodes are Gala-prefixed like the rest, so re-running replaces the knock-back
+rather than stacking another one on it, and `clear_compositor` removes it.
+
+Three figures from one render of haemoglobin, differing only in the name passed
+to `highlight_matte`:
+
+<div class="grid cards" markdown>
+
+- ![Haemoglobin, all four chains in colour](../images/05_compositing_beauty.png)
+
+    **The render.** Two alpha subunits in blue, two beta in orange, four hemes
+    in red.
+
+- ![The two alpha subunits in colour, the rest grey](../images/05_compositing_passes.png)
+
+    `highlight_matte(["GALA alpha 1", "GALA alpha 2"])`
+
+- ![The two beta subunits in colour, the rest grey](../images/05_compositing_beta.png)
+
+    `highlight_matte(["GALA beta 1", "GALA beta 2"])`
+
+- ![The four hemes in red, the protein grey](../images/05_compositing_heme.png)
+
+    `highlight_matte("GALA heme")`
+
+</div>
+
+Nothing in the 3D scene moved between them, so the four images are
+interchangeable on a slide: same lighting, same framing, same colours, and no
+second render.
 
 ## Depth of field
 
@@ -113,11 +245,34 @@ Fading the image towards the background with depth is the classic way of
 keeping a crowded binding site readable — PyMOL's `depth_cue`:
 
 ```python
-gala.depth_cue(near=0.0, far=60.0)     # angstrom from the camera
+gala.depth_cue(near=140.0, far=215.0)   # angstrom from the camera
 ```
 
+![Haemoglobin with depth cueing: the far side fades into the
+background](../images/05_compositing_depth_cue.png){ width="380" }
+
 Geometry at `near` is untouched; geometry at `far` fades fully into the
-background.
+background. The range is measured from the camera, so it has to bracket where
+the molecule actually is — a range that stops short of it fades the whole frame
+and looks like a broken render.
+
+!!! note "Depth cueing costs the transparent background"
+
+    What the far end fades *into* is the world colour, and the background is
+    at the far end too, so a depth-cued figure arrives opaque where an
+    untouched one has a usable alpha channel. It is also the one adjustment
+    here that needs the Z pass at render time rather than working from the EXR
+    afterwards.
+
+## From the sidebar
+
+The same options live in **Scene Setup ▸ Passes and Compositing**, with a
+*Set Up Compositor* button that calls `setup_compositor` with them:
+
+![The Passes and Compositing panel](../images/ui/compositing.png){ width="300" }
+
+The EXR directory shows red because its default, `//passes`, is relative to the
+.blend file — Blender marks relative paths in these fields. It is not an error.
 
 ## Cleaning up
 

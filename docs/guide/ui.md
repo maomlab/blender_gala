@@ -29,6 +29,11 @@ Sub-panels:
 The EXR directory shows red because its default, `//passes`, is relative to the
 .blend file — Blender marks relative paths in these fields. It is not an error.
 
+![The Passes and Compositing sub-panel](../images/ui/compositing.png){ width="250" }
+
+*Set Up Compositor* builds the node graph shown in the
+[compositing guide](compositing.md); *Render Still* renders through it.
+
 ### Interactions
 
 Two selection fields and a grid of interaction types. *Find Interactions*

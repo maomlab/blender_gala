@@ -171,8 +171,8 @@ def load_alphafold(accession: str, fallback: str = "plddt.pdb"):
     return molecule
 
 
-def render(gala, name: str) -> str:
-    """Render the current scene into ``docs/images``.
+def render(gala, name: str, scene=None) -> str:
+    """Render a scene into ``docs/images``.
 
     Parameters
     ----------
@@ -180,6 +180,8 @@ def render(gala, name: str) -> str:
         The imported ``blender_gala`` module.
     name : str
         File name stem.
+    scene : bpy.types.Scene, optional
+        Scene to render. Defaults to the active one.
 
     Returns
     -------
@@ -188,7 +190,10 @@ def render(gala, name: str) -> str:
     """
     os.makedirs(IMAGE_DIR, exist_ok=True)
     path = os.path.join(IMAGE_DIR, f"{name}.png")
-    gala.render(path)
+    if scene is None:
+        gala.render(path)
+    else:
+        gala.scene.render.render(path, scene=scene)
     check_not_blank(path)
     print(f"  wrote {path}")
     return path
