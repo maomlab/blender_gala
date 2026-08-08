@@ -294,6 +294,23 @@ multi-layer EXR containing Combined + Z + Cryptomatte. That is the format
 Nuke/Fusion/Krita/Blender's own compositor need to re-select an object after the
 render. Baking a matte into the beauty pass would defeat the purpose.
 
+The layer each `CryptomatteV2` node reads is qualified by view layer —
+`ViewLayer.CryptoMaterial` — and the enum is generated at draw time from the
+node's source, so it cannot be read back through `bl_rna`. Gala tries the
+qualified forms until one is accepted; assigning the bare name silently leaves
+every node on the object layer.
+
+**D-14a. `highlight_matte()` is the consumer of D-14.** It builds the graph a
+matte exists for: a `CryptomatteV2` node drives a mix between the image as
+rendered and a darkened, desaturated copy of it, so the named materials keep
+their colour and everything else becomes context. Given `source=<multilayer
+EXR>` the image and the mattes both come out of the file and the cryptomatte
+node's source is `IMAGE`, which means a scene containing no molecule, lights or
+camera can produce the figure — the claim of D-14 made good on. Because
+Molecular Nodes puts a whole structure in one object, per-chain mattes need one
+material per chain, which is a scene-building decision rather than a
+compositing one; the vignette and the guide both say so.
+
 `focus_on(target)` sets camera DOF (`use_dof`, `focus_object`, `aperture_fstop`)
 and `depth_of_field(near, far)` drives the compositor Defocus/Z-mix so a chosen
 ångström depth slab stays sharp.

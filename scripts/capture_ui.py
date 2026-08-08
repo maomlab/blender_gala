@@ -99,6 +99,14 @@ SHOTS = (
         props={"measure_selection": "resi 15 and name CA; resi 90 and name CA"},
     ),
     Shot("label", expand=("GALA_PT_label",)),
+    # The compositing panel is a sub-panel, so its parent has to be drawn for
+    # it to exist at all; the other sub-panels are left out to keep the shot
+    # about this one.
+    Shot(
+        "compositing",
+        expand=("GALA_PT_scene", "GALA_PT_compositing"),
+        props={"depth_cue": True, "depth_cue_near": 140.0, "depth_cue_far": 215.0},
+    ),
     Shot("colour", expand=("GALA_PT_color",)),
     Shot("colour-csv", expand=("GALA_PT_color",), props={"color_mode": "csv"}),
     Shot("pymol", expand=("GALA_PT_pymol",)),

@@ -711,6 +711,93 @@ def test_compositor_adds_cryptomatte_nodes(clean_scene):
         assert not node.outputs[0].is_linked
 
 
+def test_cryptomatte_nodes_point_at_their_own_layer(clean_scene):
+    """A CryptoMaterial node set to the object layer would matte the wrong thing.
+
+    The enum is qualified by view layer — ``ViewLayer.CryptoMaterial`` — and
+    rejects the bare name, so this is only right if the qualified form is what
+    gets assigned.
+    """
+    from blender_gala.scene import compositing
+
+    tree = compositing.setup_compositor(cryptomatte=True, scene=clean_scene)
+    layers = {
+        node.name: node.layer_name
+        for node in tree.nodes
+        if node.bl_idname == "CompositorNodeCryptomatteV2"
+    }
+    assert layers["GALA CryptoMaterial"].endswith("CryptoMaterial")
+    assert layers["GALA CryptoAsset"].endswith("CryptoAsset")
+
+
+def test_highlight_matte_knocks_back_everything_else(clean_scene):
+    from blender_gala.scene import compositing
+
+    tree = compositing.highlight_matte("GALA Protein", scene=clean_scene)
+    output = compositing._output_node(tree)
+
+    mix = output.inputs[0].links[0].from_node
+    assert mix.name == "GALA Highlight Mix"
+
+    crypto = tree.nodes["GALA Highlight Matte"]
+    assert crypto.matte_id == "GALA Protein"
+    assert crypto.layer_name.endswith("CryptoMaterial")
+    assert crypto.outputs["Matte"].is_linked, "the matte has to drive the mix"
+
+    # The kept side of the mix is the image as rendered; the other side went
+    # through the dim and desaturate pair.
+    knocked_back, kept = compositing._typed_sockets(mix.inputs, "RGBA")
+    assert knocked_back.links[0].from_node.name == "GALA Highlight Desaturate"
+    assert kept.links[0].from_node.bl_idname == "CompositorNodeRLayers"
+
+
+def test_highlight_matte_is_idempotent(clean_scene):
+    """Re-running has to replace the knock-back, not stack another one on it."""
+    from blender_gala.scene import compositing
+
+    compositing.setup_compositor(cryptomatte=True, scene=clean_scene)
+    tree = compositing.highlight_matte("GALA Protein", scene=clean_scene)
+    first = len(tree.nodes)
+
+    compositing.highlight_matte(["GALA Protein", "GALA Ligand"], scene=clean_scene)
+    assert len(tree.nodes) == first
+
+    mix = compositing._output_node(tree).inputs[0].links[0].from_node
+    _, kept = compositing._typed_sockets(mix.inputs, "RGBA")
+    assert kept.links[0].from_node.name == "GALA Denoise", (
+        "the second run should knock back the same image the first one did, "
+        "not the output of the first knock-back"
+    )
+    # Blender re-writes matte_id from its own list of entries, so what comes
+    # back is normalised rather than the string that went in.
+    matte_id = tree.nodes["GALA Highlight Matte"].matte_id
+    assert [name.strip() for name in matte_id.split(",")] == [
+        "GALA Protein",
+        "GALA Ligand",
+    ]
+
+
+def test_highlight_matte_validation(clean_scene):
+    from blender_gala.scene import compositing
+
+    with pytest.raises(ValueError, match="at least one matte"):
+        compositing.highlight_matte([], scene=clean_scene)
+    with pytest.raises(ValueError, match="unknown cryptomatte layer"):
+        compositing.highlight_matte("x", layer="chain", scene=clean_scene)
+    with pytest.raises(ValueError, match="dim must be"):
+        compositing.highlight_matte("x", dim=2.0, scene=clean_scene)
+    with pytest.raises(FileNotFoundError, match="EXR"):
+        compositing.highlight_matte("x", source="nowhere.exr", scene=clean_scene)
+
+
+def test_highlight_matte_is_cleared_with_the_rest(clean_scene):
+    from blender_gala.scene import compositing
+
+    compositing.highlight_matte("GALA Protein", scene=clean_scene)
+    assert compositing.clear_compositor(scene=clean_scene) > 0
+    assert compositing.clear_compositor(scene=clean_scene) == 0
+
+
 def test_depth_cue_range_validation(clean_scene):
     from blender_gala.scene import compositing
 
