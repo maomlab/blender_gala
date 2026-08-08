@@ -141,7 +141,9 @@ consistent with each other between runs.
    there is nothing else to keep in step.
 2. `make check`
 3. `make build` and test the resulting zip in a clean Blender.
-4. Tag and push; CI attaches the extension zip to the release.
+4. `git tag v<version> && git push origin v<version>`. The release workflow
+   checks the tag against the manifest, builds the extension, checks the zip
+   carries its licence, and publishes a GitHub release with the zip attached.
 
 ## Publishing to extensions.blender.org
 
