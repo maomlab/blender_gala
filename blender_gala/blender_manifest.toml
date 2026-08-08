@@ -22,7 +22,7 @@ tags = ["Render", "Scene", "Lighting", "Material"]
 blender_version_min = "5.1.0"
 
 license = ["SPDX:GPL-3.0-or-later"]
-copyright = ["2026 Blender Gala contributors"]
+copyright = ["2026 Matthew O'Meara"]
 
 [permissions]
 files = "Read HDRI files; write rendered images and EXR passes"
