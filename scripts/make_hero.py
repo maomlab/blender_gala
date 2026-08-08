@@ -60,6 +60,11 @@ CAPABILITIES = [
         "Electrostatics",
         "APBS potential, painted on a translucent surface",
     ),
+    (
+        "08_pymol_session.png",
+        "PyMOL sessions",
+        "Open a .pse, or write the scene back out as one",
+    ),
 ]
 
 # --- Geometry, in pixels of the finished image ----------------------------
