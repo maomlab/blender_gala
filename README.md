@@ -7,7 +7,7 @@
 [![Documentation](https://img.shields.io/badge/docs-maomlab.github.io%2Fblender__gala-0b7285?logo=materialformkdocs&logoColor=white)](https://maomlab.github.io/blender_gala/)
 [![CI](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml/badge.svg)](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml)
 [![Blender 5.1+](https://img.shields.io/badge/Blender-5.1%2B-ea7600?logo=blender&logoColor=white)](https://www.blender.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
 Guides, the full API reference and every vignette are on the
 **[documentation site](https://maomlab.github.io/blender_gala/)** —
@@ -245,16 +245,14 @@ scripting figures for a paper.
 
 ## Licence
 
-[MIT](LICENSE).
+[GPL-3.0-or-later](LICENSE), matching Blender and Molecular Nodes.
 
-Blender itself is GPL, and the Blender Foundation's position is that a Python
-add-on using `bpy` is a derivative work that has to be distributed under a
-GPL-compatible licence. MIT is GPL-compatible, so a distribution of Gala
-together with Blender is GPL as a whole while Gala's own code stays MIT.
-
-Publishing on [extensions.blender.org](https://extensions.blender.org)
-additionally requires an add-on to list `SPDX:GPL-3.0-or-later` among its
-licences — MIT is an accepted licence there, but not on its own. See
+Blender is GPL, and the Blender Foundation's position is that a Python add-on
+using `bpy` is a derivative work that has to be distributed under a
+GPL-compatible licence. It is also what
+[extensions.blender.org](https://extensions.blender.org) requires of an
+add-on: its upload check looks for `SPDX:GPL-3.0-or-later` specifically, so
+this is the licence Gala can be published under there. See
 [Extension Licenses](https://docs.blender.org/manual/en/latest/advanced/extensions/licenses.html).
 
 ## Acknowledgements

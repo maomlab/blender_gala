@@ -17,7 +17,7 @@ tags = ["Render", "Scene", "Lighting", "Material"]
 # time.
 blender_version_min = "5.1.0"
 
-license = ["SPDX:MIT"]
+license = ["SPDX:GPL-3.0-or-later"]
 copyright = ["2026 Blender Gala contributors"]
 
 [permissions]
