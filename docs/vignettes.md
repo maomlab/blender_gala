@@ -16,7 +16,19 @@ or all of them:
 make vignettes
 ```
 
-They write their output into `docs/images/`.
+They write their figures into `docs/images/`.
+
+Each one also ends by saving the scene it built, so the script is a starting
+point rather than only a demonstration:
+
+```bash
+blender build/vignettes/01_publication_figure.blend
+```
+
+That file has the molecule, the styles and materials, the lighting rig, the
+camera and the compositor in it, as ordinary Blender data — open it and move
+the key light, re-frame the shot, or carry on in the Gala sidebar. Set
+`GALA_VIGNETTE_BLEND_DIR` to save them somewhere other than `build/vignettes`.
 
 ## 1. A publication figure
 

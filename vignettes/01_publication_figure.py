@@ -13,7 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _common import QUALITY, heading, load_structure, render, setup
+from _common import QUALITY, heading, load_structure, render, save_blend, setup
 
 mn, gala = setup()
 
@@ -105,3 +105,13 @@ heading("5. Render")
 # ---------------------------------------------------------------------------
 render(gala, "01_publication_figure")
 print("\n  The background is alpha, so this drops onto any page colour.")
+
+
+# ---------------------------------------------------------------------------
+heading("6. Save the scene, to open in Blender")
+# ---------------------------------------------------------------------------
+# Everything `publication_setup` made is an ordinary Blender object: three
+# lamps, a camera, a material per style. Open this and drag the key light, or
+# switch the preset in the Gala sidebar and press Render — the point of doing
+# the setup in Blender rather than in a viewer is that none of it is frozen.
+save_blend("01_publication_figure")

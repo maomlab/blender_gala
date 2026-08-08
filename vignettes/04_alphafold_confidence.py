@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
-from _common import QUALITY, heading, load_alphafold, render, setup
+from _common import QUALITY, heading, load_alphafold, render, save_blend, setup
 
 mn, gala = setup()
 
@@ -121,3 +121,12 @@ gala.publication_setup(
 )
 gala.label_hud(mol, "AlphaFold confidence (pLDDT)", location=(0.04, 0.95), size=26)
 render(gala, "04_alphafold_confidence")
+
+
+# ---------------------------------------------------------------------------
+heading("7. Save the scene, to open in Blender")
+# ---------------------------------------------------------------------------
+# The confidence is written to the mesh's Color attribute, so it travels with
+# the file: open this, add a style, and the new one is banded too. The
+# selections that hid the disordered arms are attributes on the same mesh.
+save_blend("04_alphafold_confidence")

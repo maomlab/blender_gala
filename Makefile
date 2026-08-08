@@ -268,13 +268,14 @@ install: build ## Install the built extension into your Blender
 	    filepath=sorted(glob.glob('$(DIST)/*.zip'))[-1], repo='user_default', \
 	    enable_on_install=True)"
 
+# build/ holds the turntable frames and the .blend scenes the vignettes save;
 # docs/images/passes holds the multilayer EXRs vignette 5 writes beside the
-# figures. Generated, gitignored, and several megabytes, so it goes with the
-# rest of the build output rather than lingering as untracked files.
+# figures. All generated, all gitignored, and tens of megabytes between them,
+# so they go with the rest of the build output rather than lingering.
 .PHONY: clean
 clean: ## Remove build output and caches
-	rm -rf $(DIST) site htmlcov .coverage .pytest_cache .mypy_cache .ruff_cache \
-	  docs/images/passes
+	rm -rf $(DIST) build site htmlcov .coverage .pytest_cache .mypy_cache \
+	  .ruff_cache docs/images/passes
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +
 
 .PHONY: clean-all

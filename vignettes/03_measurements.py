@@ -23,7 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
-from _common import QUALITY, heading, load_structure, render, setup
+from _common import QUALITY, heading, load_structure, render, save_blend, setup
 
 mn, gala = setup()
 
@@ -316,3 +316,12 @@ for name, molecule, colour, offset, thickness in (
     )
 
 render(gala, "03_measurements")
+
+
+# ---------------------------------------------------------------------------
+heading("7. Save the scene, to open in Blender")
+# ---------------------------------------------------------------------------
+# Both receptors are in here, superposed, with the measurement curves and their
+# labels between them. Open it to check the alpha carbons the distance was
+# taken from, or to add the measurements this vignette did not make.
+save_blend("03_measurements")

@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _common import QUALITY, heading, load_structure, setup
+from _common import QUALITY, heading, load_structure, save_blend, setup
 
 mn, gala = setup()
 
@@ -175,3 +175,12 @@ if frames_dir:
         scene.frame_set(frame)
         gala.render(os.path.join(frames_dir, f"{index:03d}.png"))
     print(f"  {len(wanted)} frames at {SIZE}x{SIZE} in {frames_dir}")
+
+
+# ---------------------------------------------------------------------------
+heading("7. Save the scene, to open in Blender")
+# ---------------------------------------------------------------------------
+# The orbit is keyframed on the pivot rather than baked into the frames, so
+# this is the file to open when you want the turn to be slower, longer, or
+# about a different axis. Press space in the viewport to watch it.
+save_blend("06_turntable")

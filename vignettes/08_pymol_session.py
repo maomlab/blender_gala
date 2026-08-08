@@ -19,7 +19,15 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
-from _common import DATA_DIR, QUALITY, heading, load_structure, render, setup
+from _common import (
+    DATA_DIR,
+    QUALITY,
+    heading,
+    load_structure,
+    render,
+    save_blend,
+    setup,
+)
 
 mn, gala = setup()
 
@@ -137,3 +145,12 @@ heading("5. Render the scene that came out of the file")
 gala.three_point_lighting(restored)
 gala.setup_render(preset=QUALITY, transparent=True)
 render(gala, "08_pymol_session")
+
+
+# ---------------------------------------------------------------------------
+heading("6. Save the scene, to open in Blender")
+# ---------------------------------------------------------------------------
+# What is saved here is the scene rebuilt from the session file: the molecules,
+# representations and camera PyMOL knew about, plus the lighting and materials
+# Blender added on top. Opening it is the point of the round trip.
+save_blend("08_pymol_session")

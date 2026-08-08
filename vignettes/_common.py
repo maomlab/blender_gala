@@ -26,6 +26,13 @@ if REPO_ROOT not in sys.path:
 #: Set GALA_VIGNETTE_QUALITY=figure for publication-resolution output.
 QUALITY = os.environ.get("GALA_VIGNETTE_QUALITY", "draft")
 
+#: Where the vignettes save the scenes they built. Generated output, so it
+#: lives with the rest of it under build/; set GALA_VIGNETTE_BLEND_DIR to move
+#: it somewhere else.
+BLEND_DIR = os.environ.get(
+    "GALA_VIGNETTE_BLEND_DIR", os.path.join(REPO_ROOT, "build", "vignettes")
+)
+
 #: A render this uniform has nothing in it. Fractions of the 0-1 pixel range.
 _FLAT_TOLERANCE = 0.01
 
@@ -169,6 +176,109 @@ def load_alphafold(accession: str, fallback: str = "plddt.pdb"):
             f"{AtomStructure.from_any(molecule).n_atoms} atoms"
         )
     return molecule
+
+
+def _mn_session_pickles() -> bool:
+    """Report whether Molecular Nodes' session can be written beside the .blend.
+
+    MN stashes its Python-side session — the parsed structures behind the
+    objects — in a ``.blend.MNSession`` pickle, from a ``save_post`` handler.
+    Some structures hold a reader object that pickle refuses, and a structure
+    read from a file on disk is one of them.
+
+    That has to be found out *before* saving rather than caught during it.
+    Blender reports an exception raised inside a handler through
+    ``sys.excepthook``, which is the hook :func:`_die_on_unhandled_exception`
+    installed to stop a vignette dead — so by the time the failure is visible
+    the process is already on its way out, and no ``try`` around the save runs.
+    """
+    import bpy
+
+    # Read the session off the scene rather than importing it: MN is installed
+    # as an extension, so the module it is imported under is not the name it
+    # has on PyPI, and the property is the same object either way.
+    session = getattr(bpy.context.scene, "MNSession", None)
+    if session is None:  # pragma: no cover - MN is a soft dependency
+        return True
+
+    import pickle
+
+    try:
+        pickle.dumps(session)
+    except Exception as exc:
+        print(f"  Molecular Nodes cannot stash its session here ({exc}).")
+        return False
+    return True
+
+
+def save_blend(name: str) -> str:
+    """Save everything the vignette built as a .blend, and say how to open it.
+
+    A vignette that only leaves a PNG behind is a demonstration; one that also
+    leaves the scene is a starting point. The file holds what the script set up
+    — molecule, styles, materials, lights, camera, compositor — so the next
+    move is to open it and turn the knobs, which is the half of the work a
+    script is the wrong tool for.
+
+    Saving is deliberately the last thing each vignette does: it makes the
+    saved path the one relative paths in the file resolve against, and it is
+    the state at the end of the script that is worth reopening.
+
+    Parameters
+    ----------
+    name : str
+        File name stem, matching the vignette's own.
+
+    Returns
+    -------
+    str
+        The path written.
+    """
+    import bpy
+
+    os.makedirs(BLEND_DIR, exist_ok=True)
+    path = os.path.join(BLEND_DIR, f"{name}.blend")
+
+    # Save without the session rather than not at all: everything Blender
+    # itself needs — objects, node trees, materials, the compositor — is in the
+    # .blend, and MN rebuilds what it can from that. It only skips its stash
+    # when reopening if there is no file to find, so a stale one goes too.
+    handlers = bpy.app.handlers.save_post
+    suppressed = (
+        []
+        if _mn_session_pickles()
+        else [
+            handler
+            for handler in list(handlers)
+            if "molecularnodes" in getattr(handler, "__module__", "")
+        ]
+    )
+    for handler in suppressed:
+        handlers.remove(handler)
+
+    try:
+        # Compressed: these carry a whole structure's geometry, and the
+        # difference is several fold for a file nothing reads sequentially.
+        bpy.ops.wm.save_as_mainfile(filepath=path, compress=True)
+    finally:
+        for handler in suppressed:
+            handlers.append(handler)
+
+    if suppressed:
+        stale = f"{path}.MNSession"
+        if os.path.exists(stale):
+            os.remove(stale)
+        print("  Saved without it; the scene itself is all in the .blend.")
+
+    # The relative form only if it is genuinely shorter, which it is not when
+    # GALA_VIGNETTE_BLEND_DIR points somewhere outside the repository.
+    shown = os.path.relpath(path, REPO_ROOT)
+    if shown.startswith(os.pardir):
+        shown = path
+
+    print(f"\n  scene saved to {path} ({os.path.getsize(path) / 1e6:.1f} MB)")
+    print(f"  open it with:  blender {shown}")
+    return path
 
 
 def render(gala, name: str, scene=None) -> str:
