@@ -36,7 +36,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
-from _common import QUALITY, heading, load_structure, render, setup
+from _common import QUALITY, heading, load_structure, render, save_blend, setup
 
 mn, gala = setup()
 
@@ -384,3 +384,13 @@ scene = bpy.context.scene
 scene.cycles.samples *= 4
 print(f"  {scene.cycles.samples} samples, for the caustics")
 render(gala, "07_electrostatics")
+
+
+# ---------------------------------------------------------------------------
+heading("6. Save the scene, to open in Blender")
+# ---------------------------------------------------------------------------
+# The potential is on the surface meshes as vertex colours and the APBS maps
+# are on disk beside them, so the expensive half of this figure does not have
+# to be recomputed to be re-lit. Open it to move the two partners, or to take
+# the caustics back off and see what they were doing.
+save_blend("07_electrostatics")

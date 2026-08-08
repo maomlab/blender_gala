@@ -21,7 +21,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _common import IMAGE_DIR, QUALITY, heading, load_structure, render, setup
+from _common import (
+    IMAGE_DIR,
+    QUALITY,
+    heading,
+    load_structure,
+    render,
+    save_blend,
+    setup,
+)
 
 mn, gala = setup()
 
@@ -254,3 +262,13 @@ print(f"  depth cue over {near:.0f}-{far:.0f} A from the camera")
 print("  Fading towards the world colour fills the background with it too, so")
 print("  a depth-cued figure is opaque where an untouched one is transparent.")
 render(gala, "05_compositing_depth_cue")
+
+
+# ---------------------------------------------------------------------------
+heading("9. Save the scene, to open in Blender")
+# ---------------------------------------------------------------------------
+# Two scenes travel in this file: the molecule, and the compositing scene that
+# reads the EXR. Open it, go to the Compositing workspace, and pick a different
+# chain with the Cryptomatte node's eyedropper — that writes the same string
+# `highlight_matte` was given, and the figure changes without a render.
+save_blend("05_compositing_passes")

@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import numpy as np
-from _common import QUALITY, heading, load_structure, render, setup
+from _common import QUALITY, heading, load_structure, render, save_blend, setup
 
 mn, gala = setup()
 
@@ -255,3 +255,13 @@ gala.label_hud(mol, "Ligand binding site", location=(0.04, 0.95), size=28)
 heading("7. Render")
 # ---------------------------------------------------------------------------
 render(gala, "02_binding_site")
+
+
+# ---------------------------------------------------------------------------
+heading("8. Save the scene, to open in Blender")
+# ---------------------------------------------------------------------------
+# Every dash, label and card in here is real geometry rather than an overlay,
+# so the scene opens as a set of objects you can argue with: hide the contact a
+# reviewer disputes, nudge a label off the atom it lands on, or orbit the site
+# and reframe it.
+save_blend("02_binding_site")
