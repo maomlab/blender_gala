@@ -2,7 +2,7 @@
 
     python3 scripts/capture_window.py
 
-Writes ``docs/images/ui/window.png``: the 3D View in camera view showing a
+Writes ``docs/images/ui/window.webp``: the 3D View in camera view showing a
 styled molecule with interactions and a measurement drawn, and the Gala tab
 open in the sidebar. :mod:`scripts.make_hero` composes that into the front
 page's hero image.
@@ -32,7 +32,7 @@ from capture_ui import (  # noqa: E402  (path has to be set up first)
     find_blender,
 )
 
-OUT_PATH = os.path.join(REPO_ROOT, "docs", "images", "ui", "window.png")
+OUT_PATH = os.path.join(REPO_ROOT, "docs", "images", "ui", "window.webp")
 
 #: The structure in the shot. Adenylate kinase: two domains, a ligand in the
 #: cleft between them, and small enough to draw interactively.

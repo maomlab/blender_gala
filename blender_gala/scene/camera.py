@@ -447,7 +447,19 @@ def _object_points(obj: Any) -> np.ndarray | None:
     a box around a globular molecule stick out well past the molecule — far
     enough that framing on them leaves a visibly loose figure — so they are
     the fallback, not the rule.
+
+    The vertices are read from the object *as evaluated*, which is the only
+    reading that survives geometry nodes. A modifier that builds a membrane
+    from a grid, or instances a subunit onto the transforms of a biological
+    assembly, leaves the original mesh holding a handful of points — in the
+    assembly's case, all of them at the origin. Framing on those points aims
+    the camera at the middle of a shell 130 Å across and renders nothing at
+    all, which is a hard failure to read backwards from a black image.
     """
+    evaluated = _evaluated_points(obj)
+    if evaluated is not None:
+        return evaluated
+
     mesh = getattr(obj, "data", None)
     vertices = getattr(mesh, "vertices", None)
     if vertices is None or len(vertices) == 0:
@@ -455,16 +467,118 @@ def _object_points(obj: Any) -> np.ndarray | None:
             [np.array(obj.matrix_world @ Vector(corner)) for corner in obj.bound_box]
         )
 
+    return _mesh_points(mesh, np.array(obj.matrix_world).reshape(4, 4), _POINT_LIMIT)
+
+
+#: The 26 directions of a 3x3x3 neighbourhood, normalised. Used to reduce an
+#: instanced mesh to the few vertices that can possibly decide its extent.
+_SUPPORT_DIRECTIONS = np.array(
+    [
+        (x, y, z)
+        for x in (-1.0, 0.0, 1.0)
+        for y in (-1.0, 0.0, 1.0)
+        for z in (-1.0, 0.0, 1.0)
+        if (x, y, z) != (0.0, 0.0, 0.0)
+    ]
+)
+_SUPPORT_DIRECTIONS /= np.linalg.norm(_SUPPORT_DIRECTIONS, axis=1, keepdims=True)
+
+
+def _local_vertices(mesh: Any) -> np.ndarray | None:
+    """Vertex coordinates of ``mesh`` in its own space, or ``None`` if it has none."""
+    vertices = getattr(mesh, "vertices", None)
+    if vertices is None or len(vertices) == 0:
+        return None
     flat = np.empty(len(vertices) * 3, dtype=np.float32)
     vertices.foreach_get("co", flat)
-    local = flat.reshape(-1, 3).astype(float)
-    if len(local) > _POINT_LIMIT:
-        step = len(local) // _POINT_LIMIT + 1
-        local = local[::step]
+    return flat.reshape(-1, 3).astype(float)
 
-    matrix = np.array(obj.matrix_world).reshape(4, 4)
+
+def _support_points(local: np.ndarray) -> np.ndarray:
+    """The handful of vertices that bound ``local`` from every direction.
+
+    Thinning a mesh by taking every *n*-th vertex is the wrong thinning for a
+    bounding box: it drops the extremes along with everything else, and the
+    frame it decides is too tight — which on a capsid means the shell being
+    cropped by the edge of the picture. The vertex furthest along each of 26
+    directions cannot be dropped, and 26 of them describe a globular subunit
+    closely enough that the box around them is the box around the mesh.
+    """
+    if len(local) <= len(_SUPPORT_DIRECTIONS):
+        return local
+    extremes = (local @ _SUPPORT_DIRECTIONS.T).argmax(axis=0)
+    return local[np.unique(extremes)]
+
+
+def _transform(local: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """Carry local-space points through a 4x4 matrix."""
     homogeneous = np.hstack([local, np.ones((local.shape[0], 1))])
     return (homogeneous @ matrix.T)[:, :3]
+
+
+def _mesh_points(mesh: Any, matrix: np.ndarray, limit: int) -> np.ndarray | None:
+    """World-space vertices of ``mesh``, thinned to at most ``limit`` of them."""
+    local = _local_vertices(mesh)
+    if local is None:
+        return None
+    if limit and len(local) > limit:
+        local = local[:: len(local) // limit + 1]
+    return _transform(local, matrix)
+
+
+def _evaluated_points(obj: Any) -> np.ndarray | None:
+    """World-space points of what ``obj`` actually draws, instances included.
+
+    Returns ``None`` when the depsgraph is unavailable or the evaluated object
+    turns out to hold nothing, so the caller can fall back to reading the mesh
+    as it is stored.
+    """
+    if bpy is None:  # pragma: no cover - only reachable outside Blender
+        return None
+    try:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+    except (AttributeError, RuntimeError):  # pragma: no cover - no depsgraph
+        return None
+    if depsgraph is None:  # pragma: no cover - a context with no scene in it
+        return None
+
+    # Instances are read through their source mesh rather than one at a time: a
+    # capsid is sixty copies of one surface and a crowded scene is thousands of
+    # copies of a handful, so the vertices are reduced to support points once
+    # per distinct mesh and only those are carried through each matrix.
+    cache: dict[int, np.ndarray] = {}
+    gathered: list[np.ndarray] = []
+    for instance in depsgraph.object_instances:
+        if not (
+            instance.is_instance
+            and instance.parent is not None
+            and instance.parent.original == obj
+        ):
+            continue
+        mesh = getattr(instance.object, "data", None)
+        if mesh is None:
+            continue
+        key = mesh.as_pointer()
+        if key not in cache:
+            local = _local_vertices(mesh)
+            cache[key] = np.empty((0, 3)) if local is None else _support_points(local)
+        local = cache[key]
+        if len(local):
+            gathered.append(
+                _transform(local, np.array(instance.matrix_world).reshape(4, 4))
+            )
+
+    # Whatever the object draws in its own right, which for a modifier that
+    # only instances is nothing, and for one that builds a mesh is everything.
+    own = _mesh_points(
+        getattr(obj.evaluated_get(depsgraph), "data", None),
+        np.array(obj.matrix_world).reshape(4, 4),
+        _POINT_LIMIT,
+    )
+    if own is not None:
+        gathered.append(own)
+
+    return np.vstack(gathered) if gathered else None
 
 
 def orbit(

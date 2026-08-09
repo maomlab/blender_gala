@@ -4,7 +4,7 @@
 
 Puts the Blender window shot from :mod:`scripts.capture_window` on the left,
 the vignette renders down the right as a showcase of what the add-on does, and
-an arrow from the window to each one. Writes ``docs/images/hero.png``.
+an arrow from the window to each one. Writes ``docs/images/hero.webp``.
 
 Run under the system Python rather than Blender's: Blender bundles numpy but
 not Pillow, and this is image plumbing rather than anything to do with bpy.
@@ -19,34 +19,34 @@ from PIL import Image, ImageDraw, ImageFont
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGE_DIR = os.path.join(REPO_ROOT, "docs", "images")
-WINDOW_SHOT = os.path.join(IMAGE_DIR, "ui", "window.png")
-OUT_PATH = os.path.join(IMAGE_DIR, "hero.png")
+WINDOW_SHOT = os.path.join(IMAGE_DIR, "ui", "window.webp")
+OUT_PATH = os.path.join(IMAGE_DIR, "hero.webp")
 
 #: What each vignette shows, in the order they run. The renders are the
 #: showcase; the text says what part of the add-on made them.
 CAPABILITIES = [
     (
-        "01_publication_figure.png",
+        "01_publication_figure.webp",
         "Publication scenes",
         "Render preset, three-point rig, materials and camera, in one call",
     ),
     (
-        "02_binding_site.png",
+        "02_binding_site.webp",
         "Interactions",
         "Hydrogen bonds, salt bridges and stacking, found and drawn",
     ),
     (
-        "03_measurements.png",
+        "03_measurements.webp",
         "Measurements",
         "Distances, angles and dihedrals, with the value on the figure",
     ),
     (
-        "04_alphafold_confidence.png",
+        "04_alphafold_confidence.webp",
         "Colour by data",
         "AlphaFold confidence, B-factors, or a column of your own",
     ),
     (
-        "05_compositing_passes.png",
+        "05_compositing_passes.webp",
         "Compositing passes",
         "Cryptomatte and depth, depth of field, depth cueing",
     ),
@@ -56,12 +56,12 @@ CAPABILITIES = [
         "Turntables and orbits, rendered frame by frame",
     ),
     (
-        "07_electrostatics.png",
+        "07_electrostatics.webp",
         "Electrostatics",
         "APBS potential, painted on a translucent surface",
     ),
     (
-        "08_pymol_session.png",
+        "08_pymol_session.webp",
         "PyMOL sessions",
         "Open a .pse, or write the scene back out as one",
     ),

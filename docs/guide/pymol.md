@@ -13,14 +13,14 @@ print(result.summary())
 gala.save_session("from_blender.pse")
 ```
 
-![Adenylate kinase, exported to a session and rebuilt from it](../images/08_pymol_session.png)
+![Adenylate kinase, exported to a session and rebuilt from it](../images/08_pymol_session.webp)
 
 Without writing Python, the same two are in **File ▸ Import ▸ PyMOL Session
 (.pse)** and **File ▸ Export ▸ PyMOL Session (.pse)**, and in the sidebar under
 **Gala ▸ PyMOL Session**. Each opens a file browser with its own options: which
 state to build, and what to bring across.
 
-![The PyMOL Session panel](../images/ui/pymol.png){ width="250" }
+![The PyMOL Session panel](../images/ui/pymol.webp){ width="250" }
 
 ## No PyMOL required
 

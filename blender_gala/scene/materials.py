@@ -74,7 +74,16 @@ class GalaMaterialSpec:
         Subsurface scattering weight. A little makes protein surfaces look less
         like plastic.
     subsurface_radius : tuple[float, float, float]
-        Per-channel scattering radius, in Blender units.
+        Per-channel scattering radius, as a ratio between the three channels.
+        Blender multiplies it by ``subsurface_scale``, so this alone does not
+        set a distance.
+    subsurface_scale : float
+        What that radius is multiplied by, in Blender units — the distance
+        light actually travels inside the surface. Blender's default is 0.005,
+        which is 5 mm in a scene built to human scale and half an ångström in
+        one built to Molecular Nodes'. Subsurface scattering at that distance
+        is invisible on a molecule, so anything that wants the effect to show
+        has to raise it: a cartoon ribbon is about 0.02 units thick.
     coat_weight : float
         Clear-coat weight; useful to make a ligand glossier than its protein.
     sheen_weight : float
@@ -113,6 +122,7 @@ class GalaMaterialSpec:
     specular: float = 0.5
     subsurface_weight: float = 0.0
     subsurface_radius: tuple[float, float, float] = (0.005, 0.005, 0.005)
+    subsurface_scale: float = 0.005
     coat_weight: float = 0.0
     sheen_weight: float = 0.0
     emission_strength: float = 0.0
@@ -386,6 +396,7 @@ def build_material(
     _set_input(principled, ("Specular IOR Level", "Specular"), spec.specular)
     _set_input(principled, ("Subsurface Weight", "Subsurface"), spec.subsurface_weight)
     _set_input(principled, ("Subsurface Radius",), spec.subsurface_radius)
+    _set_input(principled, ("Subsurface Scale",), spec.subsurface_scale)
     _set_input(principled, ("Coat Weight", "Clearcoat"), spec.coat_weight)
     _set_input(principled, ("Sheen Weight", "Sheen"), spec.sheen_weight)
     _set_input(principled, ("Emission Strength",), spec.emission_strength)

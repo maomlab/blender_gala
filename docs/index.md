@@ -4,7 +4,7 @@
 
 ![The Gala sidebar open in Blender, with arrows to the figures it produces:
 publication scenes, interactions, measurements, colouring by data, compositing
-passes and animation](images/hero.png)
+passes and animation](images/hero.webp)
 
 [Molecular Nodes][mn] brought molecules into Blender and gave them Blender's
 rendering. Blender Gala adds the day-to-day work that sits either side of that:

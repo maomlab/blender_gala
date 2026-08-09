@@ -82,12 +82,46 @@ checks the output is unchanged.
 
 ## Documentation images
 
+### Image formats
+
+Everything served from the documentation is **WebP**, and nothing in the
+repository is PNG. A path-traced molecule is a photographic image — smooth
+gradients, soft shadows, a little sampling noise — which is what PNG cannot
+compress and what a modern lossy codec is built for. Converting the figures
+took `docs/images` from 45 MB to 4 MB with nothing visible to show for the
+difference, and `.gitignore` refuses PNGs there so it stays that way.
+
+The two settings that matter:
+
+- **Renders** are written by Blender at quality 92, in RGBA, by
+  `_common.render()` — so a vignette cannot write one format and name it
+  another, and a transparent film keeps its alpha all the way to disk.
+- **Screenshots and the hero** are lossless WebP, because a lossy codec rings
+  around type and those images are mostly type. Lossless WebP is still around
+  half the size of the PNG it replaces.
+
+The animations are WebP too, for the same reasons plus one more: as ordinary
+images they need no `<video>` element, so they work in Markdown, in the
+GitHub README and on the site without three code paths.
+
+The one exception is `docs/images/listing/`, which is PNG because
+extensions.blender.org takes PNG and JPEG. Those are uploaded rather than
+served, so they are build output and are not committed.
+
 The rendered figures in [Vignettes](vignettes.md) come from `make vignettes`.
-The turntable animation on that page comes from `make turntable`, which renders
-every second frame of the orbit and assembles them into an animated WebP —
-kept out of `make vignettes`, and out of CI, because a hundred-odd Cycles
-frames is not what a smoke test on every push is for. The frames stay in
-`build/turntable` so the encode can be retried without re-rendering.
+The material gallery downloads a few megabytes of CC0 textures from Poly Haven
+on its first run and caches them in `build/textures`; without network it draws
+the presets alone and says so, rather than failing.
+
+The three animations on that page come from `make vignettes-turntable`,
+`make vignettes-morph` and `make vignettes-focus-pull`, or all three with
+`make vignettes-animations`. Each renders every second frame and assembles
+them into an animated WebP, and each is kept out of `make vignettes` — and out
+of CI — because a hundred-odd Cycles frames is not what a smoke test on every
+push is for. The frames stay under `build/` so an encode can be retried
+without re-rendering. The vignettes themselves render only their end frames
+unless the corresponding environment variable names somewhere to put a
+sequence, which is what those targets set.
 The panel screenshots in [The Blender UI](guide/ui.md) come from:
 
 ```bash
@@ -122,6 +156,64 @@ consistent with each other between runs.
   community stubs but never None inside `draw`.
 - NumPy-style docstrings, which is what `mkdocstrings` renders.
 - Comments explain *why*. What the code does should be evident from the code.
+
+`ruff`, `mypy` and `fake-bpy-module` are pinned to exact versions in the `dev`
+extra, and CI installs that extra rather than a list of its own — so the
+versions that decide whether CI is green are the versions `make venv` gives
+you. These three are not ordinary dependencies: they gate the build on their
+own opinion, so a new release of any of them turns CI red with no commit here.
+That is not hypothetical — a change to how the Blender stubs type
+`evaluated_depsgraph_get` did exactly that.
+
+The `docs` extra is pinned the same way, and CI installs it rather than a list
+of its own. The site is built with `--strict`, so a warning a new release
+decides to emit is a failed build.
+
+`ruff` is in the `docs` extra as well as the `dev` one, which looks redundant
+and is not: `separate_signature` asks mkdocstrings to lay a signature out over
+several lines and it needs Black or Ruff installed to do it. Without one it
+says so at INFO level, which `--strict` does not catch, and renders
+`publication_setup`'s seventeen parameters as one unbroken line.
+
+Everything else CI reaches for is pinned the same way, in the place that owns
+it:
+
+| What | Pinned as | Where |
+| --- | --- | --- |
+| Blender | an explicit version in the download URL | the workflow's matrix |
+| Molecular Nodes | a content-addressed archive, checksummed after download | `MN_VERSION` / `MN_SHA256` |
+| APBS and PDB2PQR | exact versions | the `apbs` extra |
+| pytest | exact versions | `scripts/install_deps.py` |
+| GitHub Actions | commit SHAs, with the release named beside them | the workflow |
+| The runner image | `ubuntu-24.04`, not `ubuntu-latest` | the workflow |
+
+Installing it from a file has three traps, all of which will make a broken
+install look like a green step: Blender refuses a relative filepath, it exits
+0 when a `--python-expr` raises, and `package_install_files` returns
+`FINISHED` even when extracting the archive failed. The workflow therefore
+uses an absolute path, catches the exception, and — the only check that
+actually proves anything — imports the extension afterwards through
+`require_mn()`.
+
+Molecular Nodes is the one worth understanding. `package_install` takes
+whatever the extensions repository currently offers, so a release changed what
+CI ran against with nothing committed here — and it backs every test that
+touches a molecule and every vignette. The platform's download URLs are
+content addressed, so the hash *is* the version: take `archive_hash` for the
+linux-x64 build from
+`https://extensions.blender.org/api/v1/extensions/?platform=linux-x64` and
+raise `MN_VERSION` and `MN_SHA256` together. Installed from a file it lands
+under `bl_ext.user_default` rather than `bl_ext.blender_org`, which is why CI
+checks for it through `require_mn()` — the resolver the tests and vignettes
+use — rather than a hard-coded module path.
+
+The apt packages Blender needs are not pinned. Ubuntu's archive drops old
+versions, so a pin there fails on the archive's schedule rather than on
+anyone's decision, which is the opposite of the point.
+
+To bump any of them, raise the pin, run `make lint typecheck docs`, and fix
+what the new version has found in the same commit. Then the failure arrives
+when someone is looking at it.
 
 ## Adding a feature
 

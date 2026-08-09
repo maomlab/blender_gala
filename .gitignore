@@ -23,6 +23,18 @@ site/
 # The multilayer EXR passes vignette 5 writes next to the figures
 docs/images/passes/
 
+# Everything served from the documentation is WebP: it keeps a real alpha
+# channel and the full colour range at a tenth of PNG's size on a path-traced
+# image, and these figures are path-traced images. A stray PNG here is either
+# something that escaped the pipeline or fifty megabytes of history nobody
+# needs, so neither is committed.
+docs/images/**/*.png
+
+# The extensions.blender.org previews, which are PNG because the platform
+# takes PNG and JPEG. Build output: `make listing` regenerates them at release
+# time and they are uploaded rather than served.
+docs/images/listing/
+
 # Editors and OS
 .DS_Store
 *~

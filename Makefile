@@ -12,6 +12,8 @@ PACKAGE   := blender_gala
 DIST      := dist
 DEPS_DIR  := .blender-deps
 TURNTABLE_DIR := build/turntable
+MORPH_DIR     := build/morph
+FOCUS_DIR     := build/focus-pull
 
 # Read by hand rather than with tomllib: this runs on every invocation of make,
 # including `make help`, and tomllib needs Python 3.11. Reading it with an
@@ -66,7 +68,7 @@ help: ## Show this help
 	@echo "Blender Gala $(VERSION)"
 	@echo
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 	@echo
 	@echo "Blender: $(if $(BLENDER),$(BLENDER),NOT FOUND — set BLENDER=/path/to/blender)"
 	@echo "Python : $(PYTHON) ($(shell $(PYTHON) -V 2>&1 || echo NOT FOUND))"
@@ -207,14 +209,45 @@ vignettes: check-blender ## Run every vignette and render its images
 # Renders the orbit frame by frame and assembles them. Kept out of
 # `vignettes` because it is a hundred-odd Cycles frames, which is not what a
 # smoke test on every push is for.
-.PHONY: turntable
-turntable: check-blender ## Render the turntable animation into docs/images
+# The material sheet again at figure width, so the grain and veins can be seen.
+# Not part of `vignettes`: four times the pixels and eight times the samples.
+.PHONY: vignettes-gallery-detail
+vignettes-gallery-detail: check-blender ## Render the material sheet at figure resolution
+	GALA_GALLERY_DETAIL=1 $(BLENDER) --background \
+	  --python vignettes/11_material_gallery.py
+
+.PHONY: vignettes-turntable
+vignettes-turntable: check-blender ## Render the turntable animation into docs/images
 	@rm -rf $(TURNTABLE_DIR) && mkdir -p $(TURNTABLE_DIR)
 	GALA_TURNTABLE_DIR=$(TURNTABLE_DIR) $(BLENDER) --background \
 	  --python vignettes/06_turntable.py
 	$(PYTHON) scripts/make_animation.py $(TURNTABLE_DIR) \
 	  docs/images/06_turntable.webp
 	@echo "  frames kept in $(TURNTABLE_DIR) for re-encoding; make clean removes them"
+
+# The other two animations, kept out of `vignettes` for the same reason. Both
+# scripts render only their two end frames unless the directory variable is
+# set, so `make vignettes` stays a smoke test.
+.PHONY: vignettes-morph
+vignettes-morph: check-blender ## Render the conformational morph animation into docs/images
+	@rm -rf $(MORPH_DIR) && mkdir -p $(MORPH_DIR)
+	GALA_MORPH_DIR=$(MORPH_DIR) $(BLENDER) --background \
+	  --python vignettes/13_conformational_morph.py
+	$(PYTHON) scripts/make_animation.py $(MORPH_DIR) \
+	  docs/images/13_conformational_morph.webp
+
+.PHONY: vignettes-focus-pull
+vignettes-focus-pull: check-blender ## Render the camera move animation into docs/images
+	@rm -rf $(FOCUS_DIR) && mkdir -p $(FOCUS_DIR)
+	GALA_FOCUS_DIR=$(FOCUS_DIR) $(BLENDER) --background \
+	  --python vignettes/14_focus_pull.py
+	$(PYTHON) scripts/make_animation.py $(FOCUS_DIR) \
+	  docs/images/14_focus_pull.webp
+
+# Every animation the vignettes can produce, which is most of an hour of
+# Cycles and is why none of them is part of `make vignettes`.
+.PHONY: vignettes-animations
+vignettes-animations: vignettes-turntable vignettes-morph vignettes-focus-pull ## Render all three vignette animations
 
 .PHONY: ui-shots
 ui-shots: check-blender ## Recapture the sidebar screenshots in docs/images/ui
@@ -268,7 +301,7 @@ install: build ## Install the built extension into your Blender
 	    filepath=sorted(glob.glob('$(DIST)/*.zip'))[-1], repo='user_default', \
 	    enable_on_install=True)"
 
-# build/ holds the turntable frames and the .blend scenes the vignettes save;
+# build/ holds the animation frames and the .blend scenes the vignettes save;
 # docs/images/passes holds the multilayer EXRs vignette 5 writes beside the
 # figures. All generated, all gitignored, and tens of megabytes between them,
 # so they go with the rest of the build output rather than lingering.

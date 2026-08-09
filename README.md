@@ -15,7 +15,7 @@ start with [Getting started](https://maomlab.github.io/blender_gala/guide/gettin
 
 ![The Gala sidebar open in Blender, with arrows to the figures it produces:
 publication scenes, interactions, measurements, colouring by data, compositing
-passes and animation](docs/images/hero.png)
+passes and animation](docs/images/hero.webp)
 
 [Molecular Nodes](https://bradyajohnston.github.io/MolecularNodes) brought
 molecules into Blender and gave them Blender's rendering. Blender Gala adds the
@@ -211,7 +211,12 @@ gala.render("figure.png")
 - [API reference](https://maomlab.github.io/blender_gala/api/index.html)
 
 Runnable end-to-end examples live in [`vignettes/`](vignettes/); CI executes
-every one of them, so they cannot drift from the code.
+every one of them, so they cannot drift from the code. Eight cover Gala's own
+work, from a publication figure to a PyMOL round trip; eight more put it in a
+scene with the rest of Blender — a virus capsid and a lipid bilayer built with
+geometry nodes, a material contact sheet and procedural surface shading, a
+conformational morph and a camera move, and two pictures made to be looked at
+rather than measured.
 
 `SPECIFICATION.md` records the design decisions and the reasoning behind them —
 why `Standard` rather than `AgX`, why real geometry rather than overlays, why

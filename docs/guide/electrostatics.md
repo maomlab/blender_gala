@@ -17,7 +17,7 @@ PDB2PQR and APBS on it, reads the potential back, and colours a Molecular
 Nodes surface style by it — red where the potential is negative, white at
 zero, blue where it is positive.
 
-![Barnase and barstar, opened out, coloured by potential](../images/07_electrostatics.png)
+![Barnase and barstar, opened out, coloured by potential](../images/07_electrostatics.webp)
 
 ## Getting APBS
 

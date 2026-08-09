@@ -154,7 +154,7 @@ scene.frame_set(1)
 # ---------------------------------------------------------------------------
 # Off unless GALA_TURNTABLE_DIR names somewhere to put the frames, because CI
 # runs every vignette on every push and a hundred-odd Cycles frames is not what
-# a smoke test is for. `make turntable` sets it and builds the animation.
+# a smoke test is for. `make vignettes-turntable` sets it and builds the animation.
 #
 # The orbit puts 0 degrees on frame 1 and 360 on frame FRAMES + 1, so the
 # whole of 1..FRAMES comes back round to where it started without repeating a
@@ -168,6 +168,15 @@ if frames_dir:
     STEP = int(os.environ.get("GALA_TURNTABLE_STEP", "2"))
     SIZE = int(os.environ.get("GALA_TURNTABLE_SIZE", "480"))
     scene.render.resolution_x = scene.render.resolution_y = SIZE
+
+    # Frames are intermediates, and stay lossless PNG: `make_animation`
+    # re-encodes them into an animated WebP, and compressing lossily twice is
+    # visibly worse than doing it once. Set explicitly rather than inherited,
+    # because a still rendered earlier in the script leaves the scene in WebP
+    # and these would then be WebP bytes under a .png name.
+    gala.scene.render.set_image_format(
+        scene.render.image_settings, "PNG", color_mode="RGBA"
+    )
 
     os.makedirs(frames_dir, exist_ok=True)
     wanted = range(1, FRAMES + 1, STEP)
