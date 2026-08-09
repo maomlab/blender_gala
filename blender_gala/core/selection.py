@@ -1266,13 +1266,19 @@ def expand_selection(
     target: Any,
     selection: str | Selection | np.ndarray,
     level: str = "residue",
+    distance: float = 0.0,
     context: SelectionContext | None = None,
 ) -> np.ndarray:
-    """Grow a selection to whole residues, chains or bonded fragments.
+    """Grow a selection through space, then to whole residues or chains.
 
     This is PyMOL's selection level applied after the fact: pick a few atoms
     in the viewport, then expand to the residues they belong to. Levels
     compose, so expanding a residue-level mask to ``"chain"`` grows it again.
+
+    ``distance`` grows the mask through space first, and is what turns a picked
+    ligand into its binding site: everything within that many ångström comes
+    in, and the level then completes whatever residues were clipped. The two
+    together are ``byres (ligand expand 6)`` in the selection language.
 
     Parameters
     ----------
@@ -1283,6 +1289,9 @@ def expand_selection(
     level : {"atom", "residue", "chain", "fragment", "object"}, optional
         ``"atom"`` returns the mask unchanged, ``"fragment"`` grows to the
         connected component of the bond graph, and ``"object"`` to everything.
+    distance : float, optional
+        Radius in ångström to grow by before applying ``level``. ``0``, the
+        default, grows by level alone.
     context : SelectionContext, optional
         Shared evaluation cache.
 
@@ -1294,14 +1303,27 @@ def expand_selection(
     Raises
     ------
     ValueError
-        If ``level`` is not one of :data:`LEVELS`.
+        If ``level`` is not one of :data:`LEVELS`, or ``distance`` is negative.
+
+    Examples
+    --------
+    >>> # every residue with an atom within 6 A of the ligand, whole
+    >>> expand_selection(mol, "ligand", "residue", distance=6)  # doctest: +SKIP
     """
     if level not in LEVELS:
         raise ValueError(f"unknown selection level {level!r}; expected one of {LEVELS}")
+    if distance < 0:
+        raise ValueError(f"distance must not be negative, got {distance}")
 
     array = as_atom_array(target)
     ctx = context_for(target, array, context)
     mask = select(array, selection, ctx)
+
+    if distance > 0:
+        # `neighbours_within` returns the atoms near the mask, the source atoms
+        # among them; the union is explicit so that a cutoff smaller than a
+        # bond cannot shrink what was picked.
+        mask = mask | ctx.neighbours_within(mask, distance)
 
     if level == "atom" or not mask.any():
         return mask

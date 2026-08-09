@@ -401,7 +401,7 @@ def test_a_name_is_resolved_per_structure_not_per_string(array, named):
 
 
 def test_expand_and_describe_take_names_too(array, named):
-    grown = expand_selection(array, "pocket", "chain", named)
+    grown = expand_selection(array, "pocket", "chain", context=named)
     assert grown.tolist() == select(array, "chain B").tolist()
     assert describe_selection(array, "pocket", named) == "chain B and resi 10"
 
@@ -459,6 +459,63 @@ def test_expand_levels_compose(array):
 def test_expand_rejects_an_unknown_level(array):
     with pytest.raises(ValueError, match="unknown selection level"):
         expand_selection(array, "all", "molecule")
+
+
+# ---------------------------------------------------------------------------
+# Expanding by distance
+# ---------------------------------------------------------------------------
+
+
+def test_expand_by_distance_reaches_the_neighbours(array):
+    """Atom 5 sits 3 A from atom 3 and 4.1 A from atom 4, so a 3 A reach takes
+    the first and not the second."""
+    grown = expand_selection(array, "index 5", "atom", distance=3.0)
+    assert list(np.flatnonzero(grown)) == [2, 4]
+
+
+def test_expand_by_distance_then_completes_the_residues(array):
+    """The point of doing both: the reach clips a residue, the level mends it.
+
+    Whole residues are what a style can be applied to without a side chain
+    coming out sliced in half.
+    """
+    grown = expand_selection(array, "index 5", "residue", distance=3.0)
+    assert list(np.flatnonzero(grown)) == [0, 1, 2, 3, 4]
+
+
+def test_expand_by_distance_is_byres_expand(array):
+    """The same thing the selection language spells `byres (... expand N)`."""
+    for level, distance in (("residue", 3.0), ("atom", 6.0), ("chain", 12.0)):
+        grown = expand_selection(array, "index 5", level, distance=distance)
+        prefix = {"atom": "", "residue": "byres ", "chain": "bychain "}[level]
+        assert np.array_equal(
+            grown, select(array, f"{prefix}(index 5 expand {distance})")
+        )
+
+
+def test_expand_by_distance_keeps_what_was_picked(array):
+    """A reach shorter than any neighbour must not shrink the selection."""
+    picked = select(array, "chain B")
+    assert np.array_equal(expand_selection(array, picked, "atom", distance=0.1), picked)
+
+
+def test_expand_by_distance_of_nothing_stays_nothing(array):
+    assert not expand_selection(array, "none", "residue", distance=10.0).any()
+
+
+def test_expand_rejects_a_negative_distance(array):
+    with pytest.raises(ValueError, match="must not be negative"):
+        expand_selection(array, "all", "residue", distance=-1.0)
+
+
+def test_expand_by_distance_finds_a_binding_site(site_array):
+    """The use case: a picked ligand becomes the residues lining it."""
+    site = expand_selection(site_array, "resn LIG", "residue", distance=6.0)
+    ligand = select(site_array, "resn LIG")
+
+    assert np.array_equal(site, select(site_array, "byres (resn LIG expand 6.0)"))
+    assert (site & ligand).sum() == ligand.sum()  # the ligand is still in it
+    assert int((site & ~ligand).sum()) > 0  # and it brought the lining in
 
 
 def test_fragment_falls_back_to_chain_without_bonds(array):

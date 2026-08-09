@@ -13,7 +13,13 @@ from typing import Any
 
 import bpy
 import numpy as np
-from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
+from bpy.props import (
+    BoolProperty,
+    EnumProperty,
+    FloatProperty,
+    IntProperty,
+    StringProperty,
+)
 from bpy.types import Operator
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
@@ -379,17 +385,28 @@ def _selection_summary(structure: AtomStructure, mask: np.ndarray) -> str:
 
 
 class GALA_OT_expand_selection(_GalaOperator):
-    """Grow the selected atoms to whole residues, chains or bonded fragments
+    """Grow the selected atoms through space, then to whole residues or chains
 
     Select atoms in Edit Mode however you like — click, box, circle or
     lasso — then expand. Expanding again grows the result further, so
     residue then chain works the way PyMOL's selection levels do.
+
+    With a distance, everything within that many angstrom comes in first and
+    the level completes the residues it clipped: pick a ligand, expand by 6 at
+    the residue level, and you have its binding site.
     """
 
     bl_idname = "gala.expand_selection"
     bl_label = "Expand Selection"
 
     level: EnumProperty(name="Level", items=LEVEL_ITEMS, default="residue")
+    distance: FloatProperty(
+        name="Expand By",
+        description="Radius in angstrom to grow by first. Zero grows by level alone",
+        default=0.0,
+        min=0.0,
+        soft_max=15.0,
+    )
 
     def run(self, context, structure):
         before = structure.viewport_selection()
@@ -400,10 +417,13 @@ class GALA_OT_expand_selection(_GalaOperator):
             )
             return {"CANCELLED"}
 
-        after = gala_interactive.expand_viewport_selection(structure, self.level)
+        after = gala_interactive.expand_viewport_selection(
+            structure, self.level, self.distance
+        )
+        grew_by = f" within {self.distance:g} A" if self.distance else ""
         self.report(
             {"INFO"},
-            f"{self.level.title()}: {int(before.sum())} -> "
+            f"{self.level.title()}{grew_by}: {int(before.sum())} -> "
             f"{_selection_summary(structure, after)}.",
         )
         return {"FINISHED"}

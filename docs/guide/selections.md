@@ -158,6 +158,34 @@ gala.set_viewport_selection(mol, "byres (ligand expand 4)")  # the other way
 Levels compose, so expanding to `residue` and then to `chain` grows the
 residues to their chains, the way PyMOL's selection modes behave.
 
+### Expanding by distance
+
+A level grows a pick through the *structure*; a distance grows it through
+*space*. Tick **Expand by** in the panel and set the slider, and everything
+within that many ångström comes in before the level is applied — so the level
+completes whatever residues the sphere cut through.
+
+```python
+gala.expand_viewport_selection(mol, "residue", 6.0)   # the panel's two controls
+gala.expand_selection(mol, "ligand", "residue", distance=6.0)  # or from a selection
+```
+
+Both are `byres (ligand expand 6)` in the language, and this is the shortest
+route from a picked ligand to its binding site — pick the ligand, reach 6 Å,
+and every residue with an atom that close comes back whole:
+
+```python
+mol.add_style("cartoon")                      # the whole protein
+gala.set_viewport_selection(mol, "ligand")
+gala.expand_viewport_selection(mol, "residue", 6.0)
+gala.create_alias(mol, "site")                # name what came back
+gala.style_alias(mol, "site", style="ball_and_stick")
+```
+
+A distance of `0` — the checkbox unticked — grows by level alone. Expanding by
+distance is not idempotent, since each press reaches out from where the last
+one landed; the report line says how far it got.
+
 ### Reading a selection back
 
 `describe_selection` turns a mask into a selection string, and verifies it: the

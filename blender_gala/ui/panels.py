@@ -190,8 +190,18 @@ class GALA_PT_selection(_GalaPanel):
         column = layout.column(align=True)
         column.label(text="Expand to:")
         column.row(align=True).prop(props, "selection_level", expand=True)
+
+        # The checkbox drives the slider beside it rather than hiding it, so
+        # the distance in force stays readable when it is switched off.
+        row = column.row(align=True)
+        row.prop(props, "expand_by_distance", text="")
+        distance = row.row(align=True)
+        distance.enabled = props.expand_by_distance
+        distance.prop(props, "expand_distance", text="Expand by (A)", slider=True)
+
         expand = column.operator("gala.expand_selection", icon="SELECT_EXTEND")
         expand.level = props.selection_level
+        expand.distance = props.expand_distance if props.expand_by_distance else 0.0
 
         layout.separator()
         column = layout.column(align=True)

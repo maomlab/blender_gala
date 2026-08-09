@@ -1094,6 +1094,44 @@ def test_an_unbonded_atom_is_its_own_fragment(clean_scene, site_molecule):
 
 
 @requires_mn
+def test_expand_viewport_selection_by_distance(clean_scene, site_molecule):
+    """Pick the ligand, reach 6 A, and the residues lining it come back whole —
+    which is what a ball-and-stick branch wants to cover."""
+    import blender_gala as gala
+
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+    site = gala.expand_viewport_selection(site_molecule, "residue", 6.0)
+
+    assert np.array_equal(
+        site, gala.select(site_molecule, "byres (resn LIG expand 6.0)")
+    )
+    assert int(site.sum()) > 9
+    assert np.array_equal(gala.viewport_selection(site_molecule), site)
+
+
+@requires_mn
+def test_expand_by_distance_runs_from_the_operator(registered, site_molecule):
+    """What the panel's checkbox and slider drive."""
+    import bpy
+
+    import blender_gala as gala
+
+    bpy.context.view_layer.objects.active = site_molecule.object
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+
+    assert bpy.ops.gala.expand_selection(level="residue", distance=6.0) == {"FINISHED"}
+    assert np.array_equal(
+        gala.viewport_selection(site_molecule),
+        gala.select(site_molecule, "byres (resn LIG expand 6.0)"),
+    )
+
+    # Zero is the old behaviour: the level alone, no reach.
+    gala.set_viewport_selection(site_molecule, "resn LIG and elem CL")
+    assert bpy.ops.gala.expand_selection(level="residue", distance=0.0) == {"FINISHED"}
+    assert int(gala.viewport_selection(site_molecule).sum()) == 9
+
+
+@requires_mn
 def test_aliases_are_stored_as_boolean_attributes(clean_scene, site_molecule):
     import blender_gala as gala
 

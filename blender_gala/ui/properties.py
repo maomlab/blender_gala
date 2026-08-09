@@ -188,6 +188,22 @@ class GalaSceneProperties(PropertyGroup):
         items=list(operators.LEVEL_ITEMS),
         default="residue",
     )
+    expand_by_distance: BoolProperty(
+        name="Expand By",
+        description=(
+            "Grow the selection through space before applying the level. Pick a "
+            "ligand, expand by 6 A at the residue level, and you have its "
+            "binding site"
+        ),
+        default=False,
+    )
+    expand_distance: FloatProperty(
+        name="Distance",
+        description="How far to reach, in angstrom",
+        default=6.0,
+        min=0.0,
+        soft_max=15.0,
+    )
     selection_text: StringProperty(
         name="Syntax",
         description=(

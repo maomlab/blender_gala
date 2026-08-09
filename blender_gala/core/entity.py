@@ -262,13 +262,18 @@ class AtomStructure:
         return int(self.select(selection).sum())
 
     def expand(
-        self, selection: str | Selection | np.ndarray, level: str = "residue"
+        self,
+        selection: str | Selection | np.ndarray,
+        level: str = "residue",
+        distance: float = 0.0,
     ) -> np.ndarray:
-        """Grow ``selection`` to whole residues, chains or bonded fragments.
+        """Grow ``selection`` by ``distance`` ångström, then to whole residues.
 
         See :func:`blender_gala.core.selection.expand_selection`.
         """
-        return expand_selection(self.array, selection, level, self.context)
+        return expand_selection(
+            self.array, selection, level, distance, context=self.context
+        )
 
     def describe(self, selection: str | Selection | np.ndarray) -> str:
         """Render ``selection`` as a PyMOL selection string.

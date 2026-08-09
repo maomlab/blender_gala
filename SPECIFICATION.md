@@ -163,6 +163,14 @@ to `atom`/`residue`/`chain`/`fragment`/`object`, where a fragment is a
 connected component of the bond graph and falls back to the chain when the
 structure arrived without bonds.
 
+It also takes a `distance`, applied *before* the level: a radius in ångström
+that grows the mask through space, so the level then completes the residues the
+sphere cut through. The two together are `byres (sele expand N)`, and they are
+one call rather than two because that pairing is the whole point — a binding
+site is a distance from a ligand plus whole residues, and a distance on its own
+leaves side chains sliced in half. The order is not commutative and this is the
+useful one.
+
 Writing a selection out has to set the edge and face flags too, not just the
 vertices: entering Edit Mode flushes edge selection *down* onto vertices, so a
 vertex-only write is undone the moment the user presses Tab.

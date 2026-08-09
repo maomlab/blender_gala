@@ -45,6 +45,12 @@ the way PyMOL's selection levels do. Pressing it again grows the result
 further. The same three expansions are in **Select ▸ Expand to Residue** while
 you are in Edit Mode, which is where you will already be.
 
+Tick **Expand by** and everything within the slider's distance in ångström is
+taken first, with the level then completing the residues that sphere cut
+through. Picking a ligand and expanding by 6 Å at the residue level gives its
+binding site: store that, and *Apply Style* puts ball-and-stick on it while the
+rest of the protein stays a cartoon.
+
 The *Syntax* box reads the selection back as PyMOL syntax — *From Selection*
 fills it in, the copy button puts it on the clipboard, and *Select* runs it in
 the other direction so you can see what a typed selection covers before using
