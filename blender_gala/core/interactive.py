@@ -81,8 +81,10 @@ def set_viewport_selection(
     return AtomStructure.from_any(target).set_viewport_selection(selection)
 
 
-def expand_viewport_selection(target: Any, level: str = "residue") -> np.ndarray:
-    """Grow the viewport selection to whole residues, chains or fragments.
+def expand_viewport_selection(
+    target: Any, level: str = "residue", distance: float = 0.0
+) -> np.ndarray:
+    """Grow the viewport selection through space, then to whole residues.
 
     Parameters
     ----------
@@ -91,6 +93,10 @@ def expand_viewport_selection(target: Any, level: str = "residue") -> np.ndarray
     level : {"atom", "residue", "chain", "fragment", "object"}, optional
         How far to grow. Levels compose: expanding twice at ``"chain"`` after
         ``"residue"`` grows the residues to their chains.
+    distance : float, optional
+        Radius in ångström to grow by before applying ``level``. Picking a
+        ligand and expanding by 6 at the residue level is the binding site:
+        every residue with an atom that close, taken whole.
 
     Returns
     -------
@@ -100,12 +106,13 @@ def expand_viewport_selection(target: Any, level: str = "residue") -> np.ndarray
     Raises
     ------
     ValueError
-        If ``level`` is not one of :data:`~blender_gala.core.selection.LEVELS`.
+        If ``level`` is not one of :data:`~blender_gala.core.selection.LEVELS`,
+        or ``distance`` is negative.
     """
     if level not in LEVELS:
         raise ValueError(f"unknown selection level {level!r}; expected one of {LEVELS}")
     structure = AtomStructure.from_any(target)
-    expanded = structure.expand(structure.viewport_selection(), level)
+    expanded = structure.expand(structure.viewport_selection(), level, distance)
     structure.set_viewport_selection(expanded)
     return expanded
 

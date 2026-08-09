@@ -1094,6 +1094,44 @@ def test_an_unbonded_atom_is_its_own_fragment(clean_scene, site_molecule):
 
 
 @requires_mn
+def test_expand_viewport_selection_by_distance(clean_scene, site_molecule):
+    """Pick the ligand, reach 6 A, and the residues lining it come back whole —
+    which is what a ball-and-stick branch wants to cover."""
+    import blender_gala as gala
+
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+    site = gala.expand_viewport_selection(site_molecule, "residue", 6.0)
+
+    assert np.array_equal(
+        site, gala.select(site_molecule, "byres (resn LIG expand 6.0)")
+    )
+    assert int(site.sum()) > 9
+    assert np.array_equal(gala.viewport_selection(site_molecule), site)
+
+
+@requires_mn
+def test_expand_by_distance_runs_from_the_operator(registered, site_molecule):
+    """What the panel's checkbox and slider drive."""
+    import bpy
+
+    import blender_gala as gala
+
+    bpy.context.view_layer.objects.active = site_molecule.object
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+
+    assert bpy.ops.gala.expand_selection(level="residue", distance=6.0) == {"FINISHED"}
+    assert np.array_equal(
+        gala.viewport_selection(site_molecule),
+        gala.select(site_molecule, "byres (resn LIG expand 6.0)"),
+    )
+
+    # Zero is the old behaviour: the level alone, no reach.
+    gala.set_viewport_selection(site_molecule, "resn LIG and elem CL")
+    assert bpy.ops.gala.expand_selection(level="residue", distance=0.0) == {"FINISHED"}
+    assert int(gala.viewport_selection(site_molecule).sum()) == 9
+
+
+@requires_mn
 def test_aliases_are_stored_as_boolean_attributes(clean_scene, site_molecule):
     import blender_gala as gala
 
@@ -1216,6 +1254,144 @@ def test_style_alias_needs_an_alias_that_exists(clean_scene, site_molecule):
 
     with pytest.raises(StructureError, match="no selection named 'ghost'"):
         gala.style_alias(site_molecule, "ghost")
+
+
+# ---------------------------------------------------------------------------
+# Naming a stored selection in the selection language
+# ---------------------------------------------------------------------------
+
+
+@requires_mn
+def test_a_stored_selection_can_be_named_in_a_selection_string(
+    clean_scene, site_molecule
+):
+    """The names live on the mesh, so only a molecule can resolve them — a bare
+    AtomArray has no idea what `pocket` means."""
+    import blender_gala as gala
+
+    gala.create_alias(site_molecule, "pocket", "resn LIG")
+
+    n_atoms = int(gala.select(site_molecule, "all").sum())
+    assert int(gala.select(site_molecule, "pocket").sum()) == 9
+    assert int(gala.select(site_molecule, "not pocket").sum()) == n_atoms - 9
+    assert gala.describe_selection(site_molecule, "pocket") == gala.describe_selection(
+        site_molecule, "resn LIG"
+    )
+
+
+@requires_mn
+def test_a_stored_selection_composes_with_the_rest_of_the_language(
+    clean_scene, site_molecule
+):
+    import blender_gala as gala
+
+    gala.create_alias(site_molecule, "pocket", "resn LIG")
+
+    lining = gala.select(site_molecule, "byres (protein within 4.0 of pocket)")
+    assert np.array_equal(
+        lining, gala.select(site_molecule, "byres (protein within 4.0 of resn LIG)")
+    )
+    assert int(lining.sum()) > 0
+    assert int(gala.select(site_molecule, "pocket around 4.0").sum()) > 0
+
+
+@requires_mn
+def test_interactions_between_a_stored_selection_and_the_rest(
+    clean_scene, site_molecule
+):
+    """The reason to name a pick in the viewport: ask what it touches."""
+    import blender_gala as gala
+    from blender_gala.interactions import detect
+
+    gala.create_alias(site_molecule, "pocket", "resn LIG")
+
+    named = detect.find_interactions(site_molecule, "pocket", "not pocket", kinds="all")
+    typed = detect.find_interactions(
+        site_molecule, "resn LIG", "not resn LIG", kinds="all"
+    )
+    assert named
+    assert [(i.kind, i.atoms_a, i.atoms_b) for i in named] == [
+        (i.kind, i.atoms_a, i.atoms_b) for i in typed
+    ]
+
+
+@requires_mn
+def test_a_stored_selection_is_referenceable_the_moment_it_exists(
+    clean_scene, site_molecule
+):
+    """A structure that has already answered selections caches what it read off
+    the mesh, and must not go on answering with the mesh it read then."""
+    from blender_gala.core.entity import AtomStructure
+    from blender_gala.core.exceptions import SelectionSyntaxError
+
+    structure = AtomStructure.from_any(site_molecule)
+    structure.select("protein")  # populates the cache
+
+    structure.store_alias("pocket", "resn LIG")
+    assert int(structure.select("pocket").sum()) == 9
+
+    structure.store_alias("pocket", "resn LIG and elem CL")
+    assert int(structure.select("pocket").sum()) == 1
+
+    structure.delete_alias("pocket")
+    with pytest.raises(SelectionSyntaxError):
+        structure.select("pocket")
+
+
+@requires_mn
+def test_an_unknown_name_lists_the_stored_selections(clean_scene, site_molecule):
+    import blender_gala as gala
+    from blender_gala.core.exceptions import SelectionSyntaxError
+
+    gala.create_alias(site_molecule, "pocket", "resn LIG")
+
+    with pytest.raises(SelectionSyntaxError) as info:
+        gala.select(site_molecule, "pockte")
+    message = str(info.value)
+    assert "pockte" in message
+    assert "pocket" in message
+
+
+@requires_mn
+def test_a_boolean_attribute_gala_did_not_store_is_still_a_name(
+    clean_scene, site_molecule
+):
+    """PyMOL sessions arrive as boolean attributes without going through
+    create_alias, and a node tree can grow one by hand. Both are selections as
+    far as the language is concerned."""
+    import blender_gala as gala
+    from blender_gala.core import attributes
+
+    mask = gala.select(site_molecule, "resn LIG")
+    attributes.write_boolean(site_molecule.object, "from_pymol", mask)
+
+    assert attributes.registered(site_molecule.object) == []
+    assert int(gala.select(site_molecule, "from_pymol").sum()) == 9
+
+
+@requires_mn
+def test_the_panel_finds_interactions_with_a_stored_selection(
+    registered, site_molecule
+):
+    """The whole point, from the GUI: name a pick, then type that name into the
+    interaction fields."""
+    import bpy
+
+    import blender_gala as gala
+    from blender_gala.core import collections as gala_collections
+
+    bpy.context.view_layer.objects.active = site_molecule.object
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+
+    props = bpy.context.scene.gala
+    props.alias_name = "pocket"
+    assert bpy.ops.gala.create_alias(source="viewport") == {"FINISHED"}
+
+    props.selection_a = "pocket"
+    props.selection_b = "not pocket"
+    props.interaction_kinds = {"pi_stacking", "halogen"}
+    assert bpy.ops.gala.find_interactions() == {"FINISHED"}
+    assert gala_collections.iter_tagged()
 
 
 @requires_mn

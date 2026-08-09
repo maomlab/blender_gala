@@ -13,6 +13,7 @@ from bpy.types import Panel, UIList
 from ..core import attributes as gala_attributes
 from ..core import mn as mn_bridge
 from ..core.registration import register_classes, unregister_classes
+from ..ops import operators
 
 __all__ = ["classes"]
 
@@ -189,8 +190,18 @@ class GALA_PT_selection(_GalaPanel):
         column = layout.column(align=True)
         column.label(text="Expand to:")
         column.row(align=True).prop(props, "selection_level", expand=True)
+
+        # The checkbox drives the slider beside it rather than hiding it, so
+        # the distance in force stays readable when it is switched off.
+        row = column.row(align=True)
+        row.prop(props, "expand_by_distance", text="")
+        distance = row.row(align=True)
+        distance.enabled = props.expand_by_distance
+        distance.prop(props, "expand_distance", text="Expand by (A)", slider=True)
+
         expand = column.operator("gala.expand_selection", icon="SELECT_EXTEND")
         expand.level = props.selection_level
+        expand.distance = props.expand_distance if props.expand_by_distance else 0.0
 
         layout.separator()
         column = layout.column(align=True)
@@ -257,6 +268,12 @@ class GALA_PT_named_selections(_GalaPanel):
         row.prop(props, "alias_style", text="")
         row.prop(props, "alias_color", text="")
         column.operator("gala.style_alias", icon="SHADING_RENDERED")
+
+        # A stored selection is a word in the selection language, which is not
+        # something the panel would otherwise say anywhere.
+        active = operators.alias_of_object(obj)
+        if active:
+            layout.label(text=f'Usable in selections: "{active}"', icon="SYNTAX_ON")
 
 
 class GALA_PT_interactions(_GalaPanel):

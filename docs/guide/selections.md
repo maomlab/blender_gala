@@ -9,7 +9,9 @@ gala.select(mol, "byres (protein within 4 of ligand)")
 ```
 
 Selections are parsed once and evaluated against a biotite `AtomArray`, so they
-work on any structure and never touch Blender state.
+work on any structure and never touch Blender state — the one exception being a
+[stored selection](#using-a-name-in-a-selection), whose name lives on the
+molecule.
 
 ## Properties
 
@@ -156,6 +158,34 @@ gala.set_viewport_selection(mol, "byres (ligand expand 4)")  # the other way
 Levels compose, so expanding to `residue` and then to `chain` grows the
 residues to their chains, the way PyMOL's selection modes behave.
 
+### Expanding by distance
+
+A level grows a pick through the *structure*; a distance grows it through
+*space*. Tick **Expand by** in the panel and set the slider, and everything
+within that many ångström comes in before the level is applied — so the level
+completes whatever residues the sphere cut through.
+
+```python
+gala.expand_viewport_selection(mol, "residue", 6.0)   # the panel's two controls
+gala.expand_selection(mol, "ligand", "residue", distance=6.0)  # or from a selection
+```
+
+Both are `byres (ligand expand 6)` in the language, and this is the shortest
+route from a picked ligand to its binding site — pick the ligand, reach 6 Å,
+and every residue with an atom that close comes back whole:
+
+```python
+mol.add_style("cartoon")                      # the whole protein
+gala.set_viewport_selection(mol, "ligand")
+gala.expand_viewport_selection(mol, "residue", 6.0)
+gala.create_alias(mol, "site")                # name what came back
+gala.style_alias(mol, "site", style="ball_and_stick")
+```
+
+A distance of `0` — the checkbox unticked — grows by level alone. Expanding by
+distance is not idempotent, since each press reaches out from where the last
+one landed; the report line says how far it got.
+
 ### Reading a selection back
 
 `describe_selection` turns a mask into a selection string, and verifies it: the
@@ -182,6 +212,45 @@ gala.list_aliases(mol)                           # {'pocket': mask, 'core': mask
 gala.select_alias(mol, "pocket")                 # select it again later
 gala.alias_combine(mol, "pocket", mode="union")  # add the current pick to it
 gala.delete_alias(mol, "core")
+```
+
+### Using a name in a selection
+
+A stored name is a word in the language, the same way it is in PyMOL. Anywhere
+Gala takes a selection — an interaction side, a colour, a label, a measurement,
+the panel's text fields — the name of a stored selection will do:
+
+```python
+gala.create_alias(mol, "pocket")                        # name what you picked
+
+gala.find_interactions(mol, "pocket", "not pocket")     # what does it touch?
+gala.select(mol, "byres (protein within 4 of pocket)")  # what lines it?
+gala.color_by_selection(mol, "pocket", "orange")
+gala.label(mol, "pocket and name CA")
+```
+
+The name has to reach the molecule to mean anything, since that is where it is
+stored — `gala.select(mol, "pocket")` works, `gala.select(mol.array, "pocket")`
+cannot. Case does not matter, as it does not anywhere else in the language.
+
+Keywords are matched first, so a selection called `ligand` does not quietly
+redefine the macro of that name. Prefix it with `%` to reach it anyway:
+
+```python
+gala.select(mol, "%ligand")     # the stored selection
+gala.select(mol, "ligand")      # the macro: hetero, not water, not an ion
+```
+
+Any boolean attribute on the mesh answers to its name, not only the ones Gala
+stored — so selections that arrived with a PyMOL session, and ones built by
+hand in the node editor, are usable too. A name that matches nothing says what
+the molecule does have:
+
+```python
+>>> gala.select(mol, "pockte")
+SelectionSyntaxError: unknown selection keyword 'pockte'. Stored selections: pocket, core.
+    pockte
+    ^
 ```
 
 Because the attribute name is what Molecular Nodes reads, a named selection can
@@ -234,9 +303,19 @@ gala.save_session("figure.pse", selections=["pocket"])
 A bad selection tells you where it went wrong:
 
 ```python
->>> gala.select(mol, "chain A and bogus B")
-SelectionSyntaxError: unknown selection keyword 'bogus'
-    chain A and bogus B
+>>> gala.select(mol, "chain A and resi abc")
+SelectionSyntaxError: expected an integer or range, got 'abc'
+    chain A and resi abc
+                     ^
+```
+
+A word that is neither a keyword nor a stored selection is reported when the
+selection meets the molecule, since only the molecule knows which names exist:
+
+```python
+>>> gala.select(mol, "chain A and pockte")
+SelectionSyntaxError: unknown selection keyword 'pockte'. Stored selections: pocket.
+    chain A and pockte
                 ^
 ```
 

@@ -118,7 +118,8 @@ or_expr   := and_expr (("or" | "|") and_expr)*
 and_expr  := not_expr (("and" | "&") not_expr)*
 not_expr  := ("not" | "!") not_expr | modifier
 modifier  := primary (("within" NUM "of" | "around" NUM | "byres" | "expand" NUM) ...)*
-primary   := "(" selection ")" | keyword_sel | macro | identifier_macro
+primary   := "(" selection ")" | keyword_sel | macro | identifier_macro | name_ref
+name_ref  := ["%"] IDENT
 ```
 
 | Category | Tokens |
@@ -128,6 +129,7 @@ primary   := "(" selection ")" | keyword_sel | macro | identifier_macro
 | Operator | `and`, `or`, `not`, `within N of S`, `around N`, `byres S`, `bychain S`, `bymol S`, `expand N`, `first`, `last` |
 | Value forms | lists `A+B+C`, ranges `10-20`, open ranges `10-`, wildcards `CA*`, negative resi `\-5` |
 | Numeric | `b > 70`, `b < 50`, `q = 1.0` (`>`, `<`, `>=`, `<=`, `=`, `!=`) |
+| Name | a stored selection: `pocket`, or `%pocket` when the name collides with a keyword |
 
 `+` and `,` are value separators inside a property's argument only, never
 boolean operators, so `chain A+B` is one selector rather than two.
@@ -136,9 +138,13 @@ Comparisons are case-insensitive for chain/residue/atom names, matching PyMOL.
 `within` uses a `scipy.spatial.cKDTree` when available and a vectorised numpy
 fallback otherwise.
 
-**D-6. Selections are pure functions of an `AtomArray`.** No Blender state is
-touched, so the parser is unit-testable outside Blender and reusable for both
-molecules and trajectories.
+**D-6. Selections are pure functions of an `AtomArray` and the names the
+molecule carries.** The tokenizer, the parser and every node of the expression
+tree touch no Blender state, so the language is unit-testable outside Blender
+and reusable for both molecules and trajectories. The single exception is a
+name (D-6e), which no `AtomArray` can answer: it is resolved through a
+`SelectionContext`, which the caller supplies and which the Blender-facing
+layer fills in.
 
 **D-6a. `select()` accepts anything structure-like.** Users naturally pass
 the `Molecule` they already have. Requiring `.array` meant a `Molecule`
@@ -156,6 +162,14 @@ selection flags and a mask in both directions; `expand_selection` grows a mask
 to `atom`/`residue`/`chain`/`fragment`/`object`, where a fragment is a
 connected component of the bond graph and falls back to the chain when the
 structure arrived without bonds.
+
+It also takes a `distance`, applied *before* the level: a radius in ångström
+that grows the mask through space, so the level then completes the residues the
+sphere cut through. The two together are `byres (sele expand N)`, and they are
+one call rather than two because that pairing is the whole point — a binding
+site is a distance from a ligand plus whole residues, and a distance on its own
+leaves side chains sliced in half. The order is not commutative and this is the
+useful one.
 
 Writing a selection out has to set the edge and face flags too, not just the
 vertices: entering Edit Mode flushes edge selection *down* onto vertices, so a
@@ -179,6 +193,20 @@ as a PyMOL selection, and what any hand-built geometry node tree can consume.
 Names are therefore left bare rather than prefixed. What distinguishes a user's
 selection from the dozen booleans Molecular Nodes stores on the same mesh is an
 explicit list on the object, in `core/attributes.py`.
+
+**D-6e. A stored selection is a word in the language, as it is in PyMOL.**
+Naming a pick that can then only be styled would be half a feature: the reason
+to name a pocket is to ask what it touches — `find_interactions(mol, "pocket",
+"not pocket")` — and every Gala entry point that takes a selection now accepts
+one. A bare word that is not a keyword is a name; `%pocket` says so explicitly,
+for a name that collides with one. Because *which* names exist is a property of
+the molecule and not of the string, and because a compiled `Selection` is
+cached and reused across structures, a name binds at evaluation rather than at
+parse time — an unknown one raises `SelectionSyntaxError` when the selection
+meets a structure, listing what that structure does have. Resolution goes
+through the boolean attributes rather than the registry alone, so a selection
+that arrived from a `.pse` or was built in a node tree is referenceable too;
+keywords are matched first, so no stored name can quietly redefine `ligand`.
 
 ---
 

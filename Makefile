@@ -142,9 +142,14 @@ format: ## Reformat and autofix
 	ruff format $(PACKAGE) tests vignettes scripts
 	ruff check --fix $(PACKAGE) tests vignettes scripts
 
+# `--no-incremental` because the cache is keyed on this project's files and
+# went on reporting success after an unpinned `fake-bpy-module` release
+# retyped `bpy.context.view_layer` as optional — the errors CI then found were
+# in a file nobody had touched. A cold check of 53 files takes five seconds,
+# which is worth never being told the wrong thing.
 .PHONY: typecheck
 typecheck: ## Static type check
-	mypy $(PACKAGE)
+	mypy --no-incremental $(PACKAGE)
 
 # ---------------------------------------------------------------------------
 # Tests

@@ -3,14 +3,18 @@
 Structural biologists already think in PyMOL selection syntax, so Gala speaks
 it (SPECIFICATION D-5). A selection string is tokenised, parsed into a small
 expression tree, and evaluated against a biotite ``AtomArray`` to produce a
-boolean mask. Nothing here touches Blender, which makes the whole language
-unit-testable and reusable for trajectories (SPECIFICATION D-6).
+boolean mask. The parser and the expression tree never touch Blender, which
+makes the whole language unit-testable and reusable for trajectories
+(SPECIFICATION D-6); the one thing a mask cannot come from the ``AtomArray``
+alone is a *named* selection, which is read off the molecule's mesh when the
+caller passed something that has one.
 
 Examples
 --------
 >>> select(array, "chain A and resi 10-20 and name CA")   # doctest: +SKIP
 >>> select(array, "byres (protein within 4 of ligand)")   # doctest: +SKIP
 >>> select(array, "not (solvent or hydro) and b > 70")    # doctest: +SKIP
+>>> select(mol, "protein within 4 of pocket")             # doctest: +SKIP
 """
 
 from __future__ import annotations
@@ -18,13 +22,14 @@ from __future__ import annotations
 import fnmatch
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
 import numpy as np
 
+from . import attributes as gala_attributes
 from . import chemistry
 from .exceptions import SelectionSyntaxError
 
@@ -35,6 +40,7 @@ __all__ = [
     "Selection",
     "SelectionContext",
     "compile_selection",
+    "context_for",
     "describe_selection",
     "expand_selection",
     "select",
@@ -102,14 +108,45 @@ class SelectionContext:
     Building the KD-tree or the residue-grouping arrays is far more expensive
     than the mask arithmetic around them, so they are computed once per
     evaluation and shared by every node in the expression tree.
+
+    Parameters
+    ----------
+    array : biotite.structure.AtomArray
+        The structure being selected from.
+    named : Mapping, optional
+        The named selections this context can resolve, as ``{name: mask}``.
+        Usually the molecule's boolean mesh attributes, supplied lazily by
+        :func:`blender_gala.core.attributes.named_selections`.
     """
 
     array: Any
+    named: Mapping[str, Any] | None = None
     _cache: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
     def n_atoms(self) -> int:
         return len(self.array)
+
+    def named_selection(self, name: str) -> np.ndarray | None:
+        """Return a named selection's mask, or ``None`` if there is no such name.
+
+        Attribute names are case-sensitive, but everything else in the language
+        is not, so a name that differs only in case is accepted rather than
+        reported as unknown.
+        """
+        if not self.named:
+            return None
+        raw = _lookup(self.named, name)
+        if raw is None:
+            return None
+        mask = np.asarray(raw, dtype=bool)
+        if mask.shape != (self.n_atoms,):
+            return None
+        return mask
+
+    def named_names(self) -> list[str]:
+        """The names this context can resolve, for error messages."""
+        return list(self.named) if self.named else []
 
     def annotation(self, name: str) -> np.ndarray | None:
         """Return an annotation array from the structure, or ``None``."""
@@ -262,6 +299,19 @@ class SelectionContext:
         return np.isin(keys, np.unique(keys[mask]))
 
 
+def _lookup(named: Mapping[str, Any], name: str) -> Any:
+    """Find ``name`` in ``named``, exactly or up to case."""
+    try:
+        return named[name]
+    except KeyError:
+        pass
+    folded = name.casefold()
+    for candidate in named:
+        if candidate.casefold() == folded:
+            return named[candidate]
+    return None
+
+
 def _components_union_find(n_atoms: int, edges: np.ndarray) -> np.ndarray:
     """Connected components without scipy. Only reached if scipy is missing."""
     parent = np.arange(n_atoms)
@@ -332,6 +382,35 @@ class _Macro(_Node):
 
     def evaluate(self, ctx: SelectionContext) -> np.ndarray:
         return MACRO_KEYWORDS[self.name](ctx)
+
+
+@dataclass
+class _Named(_Node):
+    """A reference to a named selection — PyMOL's ``sele``.
+
+    Which names exist is a property of the molecule, not of the string, so a
+    name cannot be checked while parsing: the same compiled selection may be
+    evaluated against several structures. The token's position is carried along
+    so that an unresolved name still points at itself in the error.
+    """
+
+    name: str
+    text: str = ""
+    pos: int = -1
+
+    def evaluate(self, ctx: SelectionContext) -> np.ndarray:
+        mask = ctx.named_selection(self.name)
+        if mask is None:
+            available = ", ".join(ctx.named_names())
+            detail = (
+                f" Stored selections: {available}."
+                if available
+                else " There are no stored selections on this molecule."
+            )
+            raise SelectionSyntaxError(
+                f"unknown selection keyword {self.name!r}.{detail}", self.text, self.pos
+            )
+        return mask
 
 
 @dataclass
@@ -892,13 +971,21 @@ class _Parser:
         word = token.text.lower()
         if word == "*":
             return _Constant(True)
+        if token.text.startswith("%"):
+            # PyMOL's explicit form. The only way to reach a stored selection
+            # whose name collides with a keyword — `%ligand`, say.
+            if len(token.text) == 1:
+                raise SelectionSyntaxError(
+                    "'%' needs the name of a stored selection", self.text, token.pos
+                )
+            return _Named(token.text[1:], self.text, token.pos)
         if word in MACRO_KEYWORDS:
             return _Macro(word)
         if word in PROPERTY_KEYWORDS:
             return self._parse_property(word, token)
-        raise SelectionSyntaxError(
-            f"unknown selection keyword {token.text!r}", self.text, token.pos
-        )
+        # Not a keyword, so it is the name of a stored selection — checked when
+        # the selection meets a structure, since only then is there one to ask.
+        return _Named(token.text, self.text, token.pos)
 
     # -- property selectors ----------------------------------------------
     def _parse_number(self, origin: _Token) -> float:
@@ -1096,6 +1183,22 @@ def as_atom_array(target: Any) -> Any:
     return array
 
 
+def context_for(
+    target: Any, array: Any, context: SelectionContext | None = None
+) -> SelectionContext:
+    """Return the context to evaluate against, building one if needed.
+
+    A context built here knows the named selections stored on ``target``, which
+    is what lets ``"pocket around 4"`` mean anything. Reducing a molecule to its
+    ``AtomArray`` first would throw that away, since the names live on the mesh.
+    """
+    if context is not None:
+        return context
+    return SelectionContext(
+        array, named=gala_attributes.named_selections(target, len(array))
+    )
+
+
 def select(
     target: Any,
     selection: str | Selection | np.ndarray,
@@ -1123,7 +1226,7 @@ def select(
     coerced = _coerce(selection)
     n_atoms = len(array)
     if isinstance(coerced, Selection):
-        return coerced.evaluate(array, context)
+        return coerced.evaluate(array, context_for(target, array, context))
     if coerced.dtype == bool:
         if coerced.shape != (n_atoms,):
             raise ValueError(
@@ -1163,13 +1266,19 @@ def expand_selection(
     target: Any,
     selection: str | Selection | np.ndarray,
     level: str = "residue",
+    distance: float = 0.0,
     context: SelectionContext | None = None,
 ) -> np.ndarray:
-    """Grow a selection to whole residues, chains or bonded fragments.
+    """Grow a selection through space, then to whole residues or chains.
 
     This is PyMOL's selection level applied after the fact: pick a few atoms
     in the viewport, then expand to the residues they belong to. Levels
     compose, so expanding a residue-level mask to ``"chain"`` grows it again.
+
+    ``distance`` grows the mask through space first, and is what turns a picked
+    ligand into its binding site: everything within that many ångström comes
+    in, and the level then completes whatever residues were clipped. The two
+    together are ``byres (ligand expand 6)`` in the selection language.
 
     Parameters
     ----------
@@ -1180,6 +1289,9 @@ def expand_selection(
     level : {"atom", "residue", "chain", "fragment", "object"}, optional
         ``"atom"`` returns the mask unchanged, ``"fragment"`` grows to the
         connected component of the bond graph, and ``"object"`` to everything.
+    distance : float, optional
+        Radius in ångström to grow by before applying ``level``. ``0``, the
+        default, grows by level alone.
     context : SelectionContext, optional
         Shared evaluation cache.
 
@@ -1191,14 +1303,27 @@ def expand_selection(
     Raises
     ------
     ValueError
-        If ``level`` is not one of :data:`LEVELS`.
+        If ``level`` is not one of :data:`LEVELS`, or ``distance`` is negative.
+
+    Examples
+    --------
+    >>> # every residue with an atom within 6 A of the ligand, whole
+    >>> expand_selection(mol, "ligand", "residue", distance=6)  # doctest: +SKIP
     """
     if level not in LEVELS:
         raise ValueError(f"unknown selection level {level!r}; expected one of {LEVELS}")
+    if distance < 0:
+        raise ValueError(f"distance must not be negative, got {distance}")
 
     array = as_atom_array(target)
-    ctx = context if context is not None else SelectionContext(array)
+    ctx = context_for(target, array, context)
     mask = select(array, selection, ctx)
+
+    if distance > 0:
+        # `neighbours_within` returns the atoms near the mask, the source atoms
+        # among them; the union is explicit so that a cutoff smaller than a
+        # bond cannot shrink what was picked.
+        mask = mask | ctx.neighbours_within(mask, distance)
 
     if level == "atom" or not mask.any():
         return mask
@@ -1246,7 +1371,7 @@ def describe_selection(
     'chain A and resi 45-47'
     """
     array = as_atom_array(target)
-    ctx = context if context is not None else SelectionContext(array)
+    ctx = context_for(target, array, context)
     mask = select(array, selection, ctx)
 
     if not mask.any():

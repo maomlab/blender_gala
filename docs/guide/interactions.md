@@ -28,6 +28,16 @@ is on by default so a residue does not report contacts with itself:
 gala.find_interactions(mol, "chain A", "chain A", kinds="hbond")
 ```
 
+Either side can be a [stored selection](selections.md#named-selections), which
+is the quickest route from a pick in the viewport to what it touches: box-select
+some atoms, name them in the **Gala ▸ Stored Selections** panel, then type that
+name into Selection A.
+
+```python
+gala.create_alias(mol, "pocket")
+gala.find_interactions(mol, "pocket", "not pocket", kinds="all")
+```
+
 ## What is detected
 
 | Kind | Criterion (defaults) |

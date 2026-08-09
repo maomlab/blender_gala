@@ -47,7 +47,9 @@ def object_mode(obj: Any) -> Iterator[None]:
     Leaving and re-entering Edit Mode preserves the vertex selection, so the
     round trip is invisible apart from the viewport blinking.
     """
-    mode = getattr(obj, "mode", "OBJECT")
+    # Annotated because `obj` is untyped: Blender's own `mode_set` takes a
+    # literal, and whatever an object reports as its mode is one at runtime.
+    mode: Any = getattr(obj, "mode", "OBJECT")
     if obj is None or mode == "OBJECT":
         yield
         return
@@ -55,6 +57,13 @@ def object_mode(obj: Any) -> Iterator[None]:
     import bpy
 
     view_layer = bpy.context.view_layer
+    if view_layer is None:  # pragma: no cover - a real context always has one
+        # No view layer, so nothing can be made active and no mode can be set.
+        # Whatever the caller is doing will fail on its own terms, which is a
+        # better error than one about a missing attribute here.
+        yield
+        return
+
     previous = view_layer.objects.active
     view_layer.objects.active = obj
     bpy.ops.object.mode_set(mode="OBJECT")
