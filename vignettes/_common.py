@@ -33,6 +33,22 @@ BLEND_DIR = os.environ.get(
     "GALA_VIGNETTE_BLEND_DIR", os.path.join(REPO_ROOT, "build", "vignettes")
 )
 
+#: Downloaded Poly Haven textures. Generated, gitignored, and cached: they are
+#: a few hundred kilobytes each and there is no reason to fetch one twice.
+TEXTURE_DIR = os.environ.get(
+    "GALA_TEXTURE_DIR", os.path.join(REPO_ROOT, "build", "textures")
+)
+
+#: Poly Haven's public catalogue. Everything on it is CC0, so a vignette may
+#: fetch and use one without a licence to satisfy; the asset names are printed
+#: anyway, because saying where a picture's materials came from costs nothing.
+POLYHAVEN_API = "https://api.polyhaven.com"
+
+#: Poly Haven is behind Cloudflare, which answers Python's default
+#: ``Python-urllib/3.x`` with a 403. Any honest identifier gets through, and an
+#: honest one is better manners than pretending to be a browser.
+_USER_AGENT = "blender-gala-vignettes (+https://github.com/maomlab/blender_gala)"
+
 #: A render this uniform has nothing in it. Fractions of the 0-1 pixel range.
 _FLAT_TOLERANCE = 0.01
 
@@ -178,6 +194,90 @@ def load_alphafold(accession: str, fallback: str = "plddt.pdb"):
     return molecule
 
 
+def load_texture(
+    name: str,
+    maps: tuple[str, ...] = ("Diffuse", "Rough", "nor_gl"),
+    resolution: str = "1k",
+    file_format: str = "jpg",
+) -> dict[str, str]:
+    """Fetch a Poly Haven texture, cached, and return the files it downloaded.
+
+    The same bargain :func:`load_structure` makes: fetch it when there is
+    network, and when there is not, say so and hand back nothing so the caller
+    can carry on without it. A vignette that dies because a texture site is
+    down is a vignette that fails CI for a reason that has nothing to do with
+    the code being tested.
+
+    Nothing is committed. The files land in ``build/textures`` alongside the
+    rest of the generated output, and each is downloaded once.
+
+    Parameters
+    ----------
+    name : str
+        Poly Haven asset slug, e.g. ``"marble_01"``.
+    maps : tuple of str, optional
+        Which maps to fetch, named as the API names them: ``"Diffuse"``,
+        ``"Rough"``, ``"nor_gl"``, ``"AO"``, ``"Displacement"``.
+    resolution : str, optional
+        ``"1k"`` through ``"8k"``. 1k is plenty on a molecule a few hundred
+        pixels across, and is a tenth the download of 4k.
+    file_format : str, optional
+        ``"jpg"``, ``"png"`` or ``"exr"``.
+
+    Returns
+    -------
+    dict[str, str]
+        Map name to file path, or an empty dict if the texture could not be
+        fetched.
+    """
+    import json
+    import urllib.request
+
+    def fetch(url: str) -> bytes:
+        request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.read()
+
+    wanted = {
+        entry: os.path.join(TEXTURE_DIR, f"{name}_{entry}_{resolution}.{file_format}")
+        for entry in maps
+    }
+    if all(os.path.exists(path) for path in wanted.values()):
+        return wanted
+
+    try:
+        listing = json.loads(fetch(f"{POLYHAVEN_API}/files/{name}"))
+
+        # Not every asset offers every map — a texture photographed in several
+        # colourways has `col_1` and `col_2` rather than a single `Diffuse` —
+        # so take what is there and say what was not, rather than failing the
+        # whole texture over one missing file.
+        missing = [entry for entry in wanted if entry not in listing]
+        for entry in missing:
+            del wanted[entry]
+        if missing:
+            print(f"  {name} has no {', '.join(missing)}; using {sorted(wanted)}")
+
+        os.makedirs(TEXTURE_DIR, exist_ok=True)
+        for entry, path in wanted.items():
+            if os.path.exists(path):
+                continue
+            payload = fetch(listing[entry][resolution][file_format]["url"])
+            # Through a temporary name, so an interrupted download cannot leave
+            # a half-written file behind for the next run to trust and load.
+            partial = f"{path}.partial"
+            with open(partial, "wb") as handle:
+                handle.write(payload)
+            os.replace(partial, path)
+    except Exception as exc:
+        print(f"  could not fetch the {name} texture ({exc.__class__.__name__})")
+        return {}
+
+    size = sum(os.path.getsize(path) for path in wanted.values())
+    print(f"  {name}: {', '.join(wanted)} at {resolution} ({size / 1e6:.1f} MB)")
+    return wanted
+
+
 def _mn_session_pickles() -> bool:
     """Report whether Molecular Nodes' session can be written beside the .blend.
 
@@ -281,7 +381,7 @@ def save_blend(name: str) -> str:
     return path
 
 
-def render(gala, name: str, scene=None) -> str:
+def render(gala, name: str, scene=None, extension: str = "png") -> str:
     """Render a scene into ``docs/images``.
 
     Parameters
@@ -292,6 +392,10 @@ def render(gala, name: str, scene=None) -> str:
         File name stem.
     scene : bpy.types.Scene, optional
         Scene to render. Defaults to the active one.
+    extension : str, optional
+        File extension, which has to agree with the scene's image format. PNG
+        is lossless and right for a figure; a large detail render is several
+        times smaller as WebP and no worse to look at.
 
     Returns
     -------
@@ -299,7 +403,7 @@ def render(gala, name: str, scene=None) -> str:
         The path written.
     """
     os.makedirs(IMAGE_DIR, exist_ok=True)
-    path = os.path.join(IMAGE_DIR, f"{name}.png")
+    path = os.path.join(IMAGE_DIR, f"{name}.{extension}")
     if scene is None:
         gala.render(path)
     else:

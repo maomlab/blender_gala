@@ -154,7 +154,7 @@ scene.frame_set(1)
 # ---------------------------------------------------------------------------
 # Off unless GALA_TURNTABLE_DIR names somewhere to put the frames, because CI
 # runs every vignette on every push and a hundred-odd Cycles frames is not what
-# a smoke test is for. `make turntable` sets it and builds the animation.
+# a smoke test is for. `make vignettes-turntable` sets it and builds the animation.
 #
 # The orbit puts 0 degrees on frame 1 and 360 on frame FRAMES + 1, so the
 # whole of 1..FRAMES comes back round to where it started without repeating a

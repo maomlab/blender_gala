@@ -83,11 +83,19 @@ checks the output is unchanged.
 ## Documentation images
 
 The rendered figures in [Vignettes](vignettes.md) come from `make vignettes`.
-The turntable animation on that page comes from `make turntable`, which renders
-every second frame of the orbit and assembles them into an animated WebP —
-kept out of `make vignettes`, and out of CI, because a hundred-odd Cycles
-frames is not what a smoke test on every push is for. The frames stay in
-`build/turntable` so the encode can be retried without re-rendering.
+The material gallery downloads a few megabytes of CC0 textures from Poly Haven
+on its first run and caches them in `build/textures`; without network it draws
+the presets alone and says so, rather than failing.
+
+The three animations on that page come from `make vignettes-turntable`,
+`make vignettes-morph` and `make vignettes-focus-pull`, or all three with
+`make vignettes-animations`. Each renders every second frame and assembles
+them into an animated WebP, and each is kept out of `make vignettes` — and out
+of CI — because a hundred-odd Cycles frames is not what a smoke test on every
+push is for. The frames stay under `build/` so an encode can be retried
+without re-rendering. The vignettes themselves render only their end frames
+unless the corresponding environment variable names somewhere to put a
+sequence, which is what those targets set.
 The panel screenshots in [The Blender UI](guide/ui.md) come from:
 
 ```bash
