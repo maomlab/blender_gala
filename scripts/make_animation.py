@@ -15,6 +15,7 @@ every frame of the orbit rather than every third.
 from __future__ import annotations
 
 import os
+import pathlib
 import re
 import sys
 
@@ -56,6 +57,23 @@ def main(argv: list[str]) -> None:
     if len(argv) != 2:
         raise SystemExit("usage: make_animation.py <frames dir> <output.webp>")
     directory, output = argv
+
+    # An animation and a still that share a name is a silent bug: the second
+    # one written wins, the documentation shows whichever it was, and nothing
+    # anywhere reports a problem. It cost a vignette its movie once — the still
+    # and the animation had been told apart by their extensions until both
+    # became WebP. Refuse the collision instead.
+    stills = {
+        match.group(1)
+        for script in sorted(pathlib.Path("vignettes").glob("[0-9]*.py"))
+        for match in re.finditer(r'render\(gala,\s*"([^"]+)"', script.read_text())
+    }
+    stem = os.path.splitext(os.path.basename(output))[0]
+    if stem in stills:
+        raise SystemExit(
+            f"{stem} is also rendered as a still by a vignette; one would "
+            "overwrite the other. Give the animation its own name."
+        )
 
     frames = load_frames(directory)
     os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)

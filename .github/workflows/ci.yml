@@ -51,6 +51,11 @@ jobs:
       - name: Type check
         run: mypy blender_gala
 
+      # A version bump that forgets CITATION.cff leaves the repository telling
+      # people to cite a version that was never released.
+      - name: CITATION.cff matches the manifest
+        run: python scripts/make_citation.py --check
+
       - name: Fixtures are reproducible
         run: |
           python tests/data/make_fixtures.py

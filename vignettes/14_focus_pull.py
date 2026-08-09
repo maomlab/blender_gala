@@ -328,10 +328,15 @@ for animated in (camera, camera.data, target):
 # ---------------------------------------------------------------------------
 heading("5. Both ends of the shot")
 # ---------------------------------------------------------------------------
+# Named for the two ends rather than for the vignette, because the vignette's
+# own name belongs to the animation: `make vignettes-focus-pull` writes
+# `14_focus_pull.webp`, and a still sharing that name would overwrite it — as
+# one did, silently, the moment both became WebP and the file extension
+# stopped telling them apart.
 scene.frame_set(1)
 render(gala, "14_focus_wide")
 scene.frame_set(END_FRAME)
-render(gala, "14_focus_pull")
+render(gala, "14_focus_close")
 scene.frame_set(1)
 
 

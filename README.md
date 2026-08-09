@@ -2,8 +2,6 @@
 
 **Structural biology visualization tools for Blender.**
 
-### 📖 [**Read the documentation**](https://maomlab.github.io/blender_gala/)
-
 [![Documentation](https://img.shields.io/badge/docs-maomlab.github.io%2Fblender__gala-0b7285?logo=materialformkdocs&logoColor=white)](https://maomlab.github.io/blender_gala/)
 [![CI](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml/badge.svg)](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml)
 [![Blender 5.1+](https://img.shields.io/badge/Blender-5.1%2B-ea7600?logo=blender&logoColor=white)](https://www.blender.org)
@@ -270,3 +268,42 @@ Built on [Molecular Nodes](https://bradyajohnston.github.io/MolecularNodes) by
 Brady Johnston. Interaction criteria follow those published for
 [PLIP](https://github.com/pharmai/plip). The selection language follows
 [PyMOL](https://pymol.org). The confidence palette is AlphaFold DB's.
+
+Electrostatics are computed by [APBS](https://www.poissonboltzmann.org),
+which solves the Poisson-Boltzmann equation, with
+[PDB2PQR](https://www.poissonboltzmann.org) assigning the charges and radii it
+needs. Gala shells out to both rather than reimplementing either: the numbers
+on a potential map should be the ones the field has agreed on.
+
+- Jurrus, E. *et al.* Improvements to the APBS biomolecular solvation software
+  suite. *Protein Sci.* **27**, 112–128 (2018).
+  [doi:10.1002/pro.3280](https://doi.org/10.1002/pro.3280)
+- Dolinsky, T. J., Nielsen, J. E., McCammon, J. A. & Baker, N. A. PDB2PQR: an
+  automated pipeline for the setup of Poisson–Boltzmann electrostatics
+  calculations. *Nucleic Acids Res.* **32**, W665–W667 (2004).
+  [doi:10.1093/nar/gkh381](https://doi.org/10.1093/nar/gkh381)
+
+## How to cite
+
+There is no paper for Blender Gala. Cite the software itself:
+
+> O'Meara, M. *Blender Gala: structural biology visualization tools for
+> Blender.* https://github.com/maomlab/blender_gala
+
+with the version you used. GitHub's **Cite this repository** button fills that
+in from [`CITATION.cff`](CITATION.cff), which is generated from the extension
+manifest — so it cannot name a version that was never released.
+
+A figure made with Gala is made with several other people's work, and the
+citation that matters most is usually not this one. Cite alongside it:
+
+- **[Blender](https://www.blender.org)** — the renderer.
+- **[Molecular Nodes](https://bradyajohnston.github.io/MolecularNodes)** —
+  every molecule in the scene was imported and styled by it.
+- **[APBS and PDB2PQR](https://www.poissonboltzmann.org)** — if the figure
+  shows electrostatics, using the two references above.
+- **[PLIP](https://github.com/pharmai/plip)** — if you report interactions
+  found by `find_interactions`, whose criteria are theirs.
+
+And cite the structures themselves: a PDB entry has an accession and a paper,
+and a figure of one owes both.

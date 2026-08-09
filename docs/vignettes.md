@@ -338,7 +338,7 @@ every frame from the interpolated atoms.
 
 | Wide | Close |
 | --- | --- |
-| ![14_focus_wide](images/14_focus_wide.webp) | ![14_focus_pull](images/14_focus_pull.webp) |
+| ![14_focus_wide](images/14_focus_wide.webp) | ![14_focus_close](images/14_focus_close.webp) |
 
 `14_focus_pull.py` — from an establishing shot of the Abl kinase domain to a
 close-up on imatinib in its pocket, without a cut. Both poses are computed
