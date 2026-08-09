@@ -917,3 +917,101 @@ def test_publication_setup_rejects_unknown_lighting(clean_scene):
 
     with pytest.raises(ValueError, match="lighting_style"):
         setup.publication_setup(None, lighting_style="candles", scene=clean_scene)
+
+
+# ---------------------------------------------------------------------------
+# Framing what geometry nodes drew
+# ---------------------------------------------------------------------------
+
+
+def test_support_points_bound_the_cloud():
+    """Thinning must keep the extremes, which stride sampling does not.
+
+    A bounding box built from every *n*-th vertex of a mesh is smaller than the
+    mesh, and a camera fitted to it crops the subject.
+    """
+    from blender_gala.scene.camera import _support_points
+
+    generator = np.random.default_rng(0)
+    cloud = generator.normal(size=(4000, 3))
+    # A handful of deliberate outliers, one per axis, none of them near an
+    # index a stride would land on.
+    cloud[1237] = (7.0, 0.0, 0.0)
+    cloud[2551] = (0.0, -9.0, 0.0)
+    cloud[3907] = (0.0, 0.0, 8.0)
+
+    support = _support_points(cloud)
+    assert len(support) <= 26
+    assert np.allclose(support.min(axis=0), cloud.min(axis=0))
+    assert np.allclose(support.max(axis=0), cloud.max(axis=0))
+
+
+def test_support_points_pass_small_clouds_through():
+    from blender_gala.scene.camera import _support_points
+
+    cloud = np.arange(12, dtype=float).reshape(4, 3)
+    assert _support_points(cloud) is cloud
+
+
+@requires_bpy
+def test_framing_fits_geometry_node_instances(clean_scene):
+    """A camera aimed at an instancer must fit the instances.
+
+    The mesh a geometry node tree instances *from* is often a few points at the
+    origin — for a biological assembly, all of them at the origin. Framing
+    those puts the camera inside the subject and renders nothing.
+    """
+    import bpy
+
+    from blender_gala.scene import camera, render
+
+    render.set_resolution(400, 400)
+
+    # The thing being instanced is large ...
+    source_mesh = bpy.data.meshes.new("Source")
+    source_mesh.from_pydata(
+        [(-2.0, 0.0, -2.0), (2.0, 0.0, -2.0), (0.0, 0.0, 2.0)], [], [(0, 1, 2)]
+    )
+    source_mesh.update()
+    source = bpy.data.objects.new("Source", source_mesh)
+    clean_scene.collection.objects.link(source)
+
+    # ... and the mesh it is instanced onto is two points a fifth of a unit
+    # apart, so reading the stored mesh and reading what is drawn differ by
+    # more than a rounding error.
+    points = bpy.data.meshes.new("Points")
+    points.from_pydata([(-0.1, 0.0, 0.0), (0.1, 0.0, 0.0)], [], [])
+    points.update()
+    instancer = bpy.data.objects.new("Instancer", points)
+    clean_scene.collection.objects.link(instancer)
+
+    tree = bpy.data.node_groups.new("Test Instancing", "GeometryNodeTree")
+    tree.interface.new_socket(
+        "Geometry", in_out="INPUT", socket_type="NodeSocketGeometry"
+    )
+    tree.interface.new_socket(
+        "Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry"
+    )
+    group_input = tree.nodes.new("NodeGroupInput")
+    group_output = tree.nodes.new("NodeGroupOutput")
+    info = tree.nodes.new("GeometryNodeObjectInfo")
+    info.inputs["Object"].default_value = source
+    info.inputs["As Instance"].default_value = True
+    on_points = tree.nodes.new("GeometryNodeInstanceOnPoints")
+    tree.links.new(group_input.outputs[0], on_points.inputs["Points"])
+    tree.links.new(info.outputs["Geometry"], on_points.inputs["Instance"])
+    tree.links.new(on_points.outputs["Instances"], group_output.inputs[0])
+    instancer.modifiers.new("Instancing", "NODES").node_group = tree
+    bpy.context.view_layer.update()
+
+    from blender_gala.scene.camera import _object_points
+
+    seen = _object_points(instancer)
+    assert seen is not None
+    assert float(np.ptp(seen[:, 0])) > 4.0, "the instances span 4.2 units"
+    assert float(np.ptp(seen[:, 2])) > 3.9, "and 4 units the other way"
+
+    obj = camera.frame_target(instancer, viewpoint="front", margin=1.05)
+    # Standing off far enough to see two four-unit triangles, not two points a
+    # fifth of a unit apart.
+    assert abs(obj.location.y) > 4.0

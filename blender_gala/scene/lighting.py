@@ -149,13 +149,25 @@ def _subject_bounds(target: Any, scene: Any) -> tuple[np.ndarray, float]:
 
 
 def _object_bounds(objects: Sequence[Any]) -> tuple[np.ndarray, float]:
-    corners = []
+    """Centre and radius of a set of objects, as they are actually drawn.
+
+    Points come from the evaluated objects, so a light rig scaled from these
+    is scaled to what geometry nodes built rather than to the mesh it was
+    built from. The bounding-box corners are the fallback for anything that
+    evaluates to no vertices at all.
+    """
+    from .camera import _object_points
+
+    gathered: list[np.ndarray] = []
     for obj in objects:
-        matrix = obj.matrix_world
-        corners.extend([np.array(matrix @ Vector(c)) for c in obj.bound_box])
-    if not corners:
+        points = _object_points(obj)
+        if points is None or not len(points):
+            matrix = obj.matrix_world
+            points = np.asarray([np.array(matrix @ Vector(c)) for c in obj.bound_box])
+        gathered.append(np.asarray(points))
+    if not gathered:
         return np.zeros(3), 1.0
-    points = np.asarray(corners)
+    points = np.vstack(gathered)
     centre = 0.5 * (points.min(axis=0) + points.max(axis=0))
     radius = float(np.linalg.norm(points - centre, axis=1).max())
     return centre, max(radius, 1e-3)
