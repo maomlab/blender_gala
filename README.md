@@ -268,3 +268,39 @@ Built on [Molecular Nodes](https://bradyajohnston.github.io/MolecularNodes) by
 Brady Johnston. Interaction criteria follow those published for
 [PLIP](https://github.com/pharmai/plip). The selection language follows
 [PyMOL](https://pymol.org). The confidence palette is AlphaFold DB's.
+
+Electrostatics are computed by [APBS](https://www.poissonboltzmann.org),
+which solves the Poisson-Boltzmann equation, with
+[PDB2PQR](https://www.poissonboltzmann.org) assigning the charges and radii it
+needs. Gala shells out to both rather than reimplementing either: the numbers
+on a potential map should be the ones the field has agreed on.
+
+- Jurrus, E. *et al.* Improvements to the APBS biomolecular solvation software
+  suite. *Protein Sci.* **27**, 112–128 (2018).
+  [doi:10.1002/pro.3280](https://doi.org/10.1002/pro.3280)
+- Dolinsky, T. J., Nielsen, J. E., McCammon, J. A. & Baker, N. A. PDB2PQR: an
+  automated pipeline for the setup of Poisson–Boltzmann electrostatics
+  calculations. *Nucleic Acids Res.* **32**, W665–W667 (2004).
+  [doi:10.1093/nar/gkh381](https://doi.org/10.1093/nar/gkh381)
+
+## How to cite
+
+There is no paper for Blender Gala. Cite the software and the version you
+used:
+
+> O'Meara, M. Blender Gala: structural biology visualization tools for
+> Blender. Version 0.2.0. https://github.com/maomlab/blender_gala
+
+A figure made with Gala is made with several other people's work, and the
+citation that matters most is usually not this one. Cite alongside it:
+
+- **[Blender](https://www.blender.org)** — the renderer.
+- **[Molecular Nodes](https://bradyajohnston.github.io/MolecularNodes)** —
+  every molecule in the scene was imported and styled by it.
+- **[APBS and PDB2PQR](https://www.poissonboltzmann.org)** — if the figure
+  shows electrostatics, using the two references above.
+- **[PLIP](https://github.com/pharmai/plip)** — if you report interactions
+  found by `find_interactions`, whose criteria are theirs.
+
+And cite the structures themselves: a PDB entry has an accession and a paper,
+and a figure of one owes both.
