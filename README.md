@@ -285,11 +285,14 @@ on a potential map should be the ones the field has agreed on.
 
 ## How to cite
 
-There is no paper for Blender Gala. Cite the software and the version you
-used:
+There is no paper for Blender Gala. Cite the software itself:
 
-> O'Meara, M. Blender Gala: structural biology visualization tools for
-> Blender. Version 0.2.0. https://github.com/maomlab/blender_gala
+> O'Meara, M. *Blender Gala: structural biology visualization tools for
+> Blender.* https://github.com/maomlab/blender_gala
+
+with the version you used. GitHub's **Cite this repository** button fills that
+in from [`CITATION.cff`](CITATION.cff), which is generated from the extension
+manifest — so it cannot name a version that was never released.
 
 A figure made with Gala is made with several other people's work, and the
 citation that matters most is usually not this one. Cite alongside it:

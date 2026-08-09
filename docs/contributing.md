@@ -231,11 +231,16 @@ when someone is looking at it.
    the version is written: `blender_gala.__version__` reads it at run time,
    `make help` reads it, and hatchling reads it for the wheel metadata, so
    there is nothing else to keep in step.
-2. `make check`
-3. `make build` and test the resulting zip in a clean Blender.
-4. `git tag v<version> && git push origin v<version>`. The release workflow
+2. `make citation`, which rewrites `CITATION.cff` from that manifest. `make
+   check` fails if you forget, so this is a reminder rather than a rule.
+3. `make check`
+4. `make build` and test the resulting zip in a clean Blender.
+5. `git tag v<version> && git push origin v<version>`. The release workflow
    checks the tag against the manifest, builds the extension, checks the zip
    carries its licence, and publishes a GitHub release with the zip attached.
+6. `make citation` once more, now that the tag exists, to record the release
+   date. Nothing fails if you do not — the check ignores that field precisely
+   because it cannot be known when the version is bumped.
 
 ## Publishing to extensions.blender.org
 

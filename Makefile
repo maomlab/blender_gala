@@ -163,12 +163,23 @@ coverage: check-blender ## Run the suite with a coverage report
 	$(BLENDER) --background --python tests/run_tests.py -- \
 	  --cov=$(PACKAGE) --cov-report=term-missing --cov-report=html $(PYTEST_ARGS)
 
+# GitHub turns CITATION.cff into the "Cite this repository" button, so the
+# version in it is one more place the release number can go stale. Generated
+# from the manifest instead; `make check` fails if it has drifted.
+.PHONY: citation
+citation: ## Regenerate CITATION.cff from the extension manifest
+	$(PYTHON) scripts/make_citation.py
+
 .PHONY: fixtures
 fixtures: ## Regenerate the synthetic test structures
 	$(PYTHON) tests/data/make_fixtures.py
 
 .PHONY: check
-check: lint typecheck test ## Everything CI runs
+check: lint typecheck citation-check test ## Everything CI runs
+
+.PHONY: citation-check
+citation-check: ## Fail if CITATION.cff has drifted from the manifest
+	$(PYTHON) scripts/make_citation.py --check
 
 # ---------------------------------------------------------------------------
 # Documentation
