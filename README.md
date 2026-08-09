@@ -2,8 +2,6 @@
 
 **Structural biology visualization tools for Blender.**
 
-### 📖 [**Read the documentation**](https://maomlab.github.io/blender_gala/)
-
 [![Documentation](https://img.shields.io/badge/docs-maomlab.github.io%2Fblender__gala-0b7285?logo=materialformkdocs&logoColor=white)](https://maomlab.github.io/blender_gala/)
 [![CI](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml/badge.svg)](https://github.com/maomlab/blender_gala/actions/workflows/ci.yml)
 [![Blender 5.1+](https://img.shields.io/badge/Blender-5.1%2B-ea7600?logo=blender&logoColor=white)](https://www.blender.org)
