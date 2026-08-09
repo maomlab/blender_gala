@@ -170,10 +170,18 @@ class AtomStructure:
 
     @property
     def context(self) -> SelectionContext:
-        """A cached :class:`SelectionContext` for this structure."""
+        """A cached :class:`SelectionContext` for this structure.
+
+        It carries the structure's named selections, so every selection this
+        structure evaluates — a colour, an interaction side, a label — can name
+        one that was stored from the viewport.
+        """
         cached = getattr(self, "_context", None)
         if cached is None or cached.array is not self.array:
-            cached = SelectionContext(self.array)
+            cached = SelectionContext(
+                self.array,
+                named=gala_attributes.named_selections(self.object, self.n_atoms),
+            )
             self._context = cached
         return cached
 
@@ -361,6 +369,7 @@ class AtomStructure:
             )
         gala_attributes.write_boolean(self.object, name, mask)
         gala_attributes.register(self.object, name)
+        self._forget_names()
         return mask
 
     def delete_alias(self, name: str) -> bool:
@@ -368,7 +377,21 @@ class AtomStructure:
         if self.object is None:
             return False
         gala_attributes.unregister(self.object, name)
-        return gala_attributes.delete_boolean(self.object, name)
+        deleted = gala_attributes.delete_boolean(self.object, name)
+        self._forget_names()
+        return deleted
+
+    def _forget_names(self) -> None:
+        """Re-read the stored selections after one of them changed.
+
+        The cached context holds masks it has already been asked for, so a
+        selection naming the alias just written would otherwise see the old
+        one. The geometry caches beside it are untouched — nothing about the
+        structure moved.
+        """
+        cached = getattr(self, "_context", None)
+        if cached is not None:
+            cached.named = gala_attributes.named_selections(self.object, self.n_atoms)
 
     def one_index(
         self,

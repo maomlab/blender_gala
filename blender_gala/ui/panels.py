@@ -13,6 +13,7 @@ from bpy.types import Panel, UIList
 from ..core import attributes as gala_attributes
 from ..core import mn as mn_bridge
 from ..core.registration import register_classes, unregister_classes
+from ..ops import operators
 
 __all__ = ["classes"]
 
@@ -257,6 +258,12 @@ class GALA_PT_named_selections(_GalaPanel):
         row.prop(props, "alias_style", text="")
         row.prop(props, "alias_color", text="")
         column.operator("gala.style_alias", icon="SHADING_RENDERED")
+
+        # A stored selection is a word in the selection language, which is not
+        # something the panel would otherwise say anywhere.
+        active = operators.alias_of_object(obj)
+        if active:
+            layout.label(text=f'Usable in selections: "{active}"', icon="SYNTAX_ON")
 
 
 class GALA_PT_interactions(_GalaPanel):

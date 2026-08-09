@@ -9,7 +9,9 @@ gala.select(mol, "byres (protein within 4 of ligand)")
 ```
 
 Selections are parsed once and evaluated against a biotite `AtomArray`, so they
-work on any structure and never touch Blender state.
+work on any structure and never touch Blender state — the one exception being a
+[stored selection](#using-a-name-in-a-selection), whose name lives on the
+molecule.
 
 ## Properties
 
@@ -184,6 +186,45 @@ gala.alias_combine(mol, "pocket", mode="union")  # add the current pick to it
 gala.delete_alias(mol, "core")
 ```
 
+### Using a name in a selection
+
+A stored name is a word in the language, the same way it is in PyMOL. Anywhere
+Gala takes a selection — an interaction side, a colour, a label, a measurement,
+the panel's text fields — the name of a stored selection will do:
+
+```python
+gala.create_alias(mol, "pocket")                        # name what you picked
+
+gala.find_interactions(mol, "pocket", "not pocket")     # what does it touch?
+gala.select(mol, "byres (protein within 4 of pocket)")  # what lines it?
+gala.color_by_selection(mol, "pocket", "orange")
+gala.label(mol, "pocket and name CA")
+```
+
+The name has to reach the molecule to mean anything, since that is where it is
+stored — `gala.select(mol, "pocket")` works, `gala.select(mol.array, "pocket")`
+cannot. Case does not matter, as it does not anywhere else in the language.
+
+Keywords are matched first, so a selection called `ligand` does not quietly
+redefine the macro of that name. Prefix it with `%` to reach it anyway:
+
+```python
+gala.select(mol, "%ligand")     # the stored selection
+gala.select(mol, "ligand")      # the macro: hetero, not water, not an ion
+```
+
+Any boolean attribute on the mesh answers to its name, not only the ones Gala
+stored — so selections that arrived with a PyMOL session, and ones built by
+hand in the node editor, are usable too. A name that matches nothing says what
+the molecule does have:
+
+```python
+>>> gala.select(mol, "pockte")
+SelectionSyntaxError: unknown selection keyword 'pockte'. Stored selections: pocket, core.
+    pockte
+    ^
+```
+
 Because the attribute name is what Molecular Nodes reads, a named selection can
 be styled on its own — which is how a pocket gets sticks while the rest of the
 protein stays a cartoon:
@@ -234,9 +275,19 @@ gala.save_session("figure.pse", selections=["pocket"])
 A bad selection tells you where it went wrong:
 
 ```python
->>> gala.select(mol, "chain A and bogus B")
-SelectionSyntaxError: unknown selection keyword 'bogus'
-    chain A and bogus B
+>>> gala.select(mol, "chain A and resi abc")
+SelectionSyntaxError: expected an integer or range, got 'abc'
+    chain A and resi abc
+                     ^
+```
+
+A word that is neither a keyword nor a stored selection is reported when the
+selection meets the molecule, since only the molecule knows which names exist:
+
+```python
+>>> gala.select(mol, "chain A and pockte")
+SelectionSyntaxError: unknown selection keyword 'pockte'. Stored selections: pocket.
+    chain A and pockte
                 ^
 ```
 

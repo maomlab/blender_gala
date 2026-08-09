@@ -192,7 +192,8 @@ class GalaSceneProperties(PropertyGroup):
         name="Syntax",
         description=(
             "The selected atoms as a PyMOL selection. Editable: type one and "
-            "press Select to see what it covers"
+            "press Select to see what it covers. A stored selection can be "
+            "named, as in 'pocket around 4'"
         ),
         default="",
     )
@@ -224,12 +225,18 @@ class GalaSceneProperties(PropertyGroup):
     # -- interactions ---------------------------------------------------
     selection_a: StringProperty(
         name="Selection A",
-        description="PyMOL-style selection, e.g. 'ligand' or 'chain A and resi 45-60'",
+        description=(
+            "PyMOL-style selection, e.g. 'ligand', 'chain A and resi 45-60', or "
+            "the name of a stored selection"
+        ),
         default="ligand",
     )
     selection_b: StringProperty(
         name="Selection B",
-        description="The other side of the interaction",
+        description=(
+            "The other side of the interaction. 'not pocket' asks what a stored "
+            "selection touches"
+        ),
         default="protein",
     )
     interaction_kinds: EnumProperty(
@@ -269,7 +276,11 @@ class GalaSceneProperties(PropertyGroup):
     )
 
     # -- labels ---------------------------------------------------------
-    label_selection: StringProperty(name="Selection", default="ligand")
+    label_selection: StringProperty(
+        name="Selection",
+        description="What to label. A stored selection can be named",
+        default="ligand",
+    )
     label_template: StringProperty(
         name="Template",
         description="Fields: {chain} {resi} {resn} {one} {name} {elem} {b} {q}",
@@ -314,7 +325,11 @@ class GalaSceneProperties(PropertyGroup):
         default="banded",
     )
     colormap: EnumProperty(name="Colormap", items=_colormap_items, default=0)
-    color_selection: StringProperty(name="Selection", default="all")
+    color_selection: StringProperty(
+        name="Selection",
+        description="What to colour. A stored selection can be named",
+        default="all",
+    )
     csv_path: StringProperty(name="CSV", subtype="FILE_PATH", default="")
     csv_value_column: StringProperty(name="Value Column", default="value")
     csv_resid_column: StringProperty(name="Residue Column", default="res_id")

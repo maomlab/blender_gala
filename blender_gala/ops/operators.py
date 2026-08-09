@@ -38,6 +38,7 @@ __all__ = [
     "STYLE_ITEMS",
     "active_alias",
     "active_structure",
+    "alias_of_object",
     "classes",
     "selected_atom_indices",
 ]
@@ -131,7 +132,12 @@ def selected_atom_indices(context: Any) -> list[int]:
 
 
 def active_alias(structure: AtomStructure | None) -> str | None:
-    """The named selection highlighted in the panel's list, if any.
+    """The named selection highlighted in the panel's list, if any."""
+    return alias_of_object(getattr(structure, "object", None))
+
+
+def alias_of_object(obj: Any) -> str | None:
+    """The named selection highlighted in the panel's list for ``obj``.
 
     The list is drawn over ``mesh.attributes`` — the attributes *are* the
     selections, so there is no second copy of the names to keep in step — and
@@ -139,7 +145,6 @@ def active_alias(structure: AtomStructure | None) -> str | None:
     something which is not one of Gala's selections falls back to the first
     one, which is friendlier than doing nothing.
     """
-    obj = getattr(structure, "object", None)
     if obj is None:
         return None
     names = gala_attributes.registered(obj)

@@ -11,6 +11,7 @@ from blender_gala.core.selection import (
     MACRO_KEYWORDS,
     PROPERTY_KEYWORDS,
     Selection,
+    SelectionContext,
     compile_selection,
     describe_selection,
     expand_selection,
@@ -57,6 +58,10 @@ def array():
 
 def count(array, expression):
     return int(select(array, expression).sum())
+
+
+def count_in(array, expression, context):
+    return int(select(array, expression, context).sum())
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +327,83 @@ def test_selection_is_reusable_across_arrays(array):
 
 def test_repr_is_useful():
     assert repr(Selection("chain A")) == "Selection('chain A')"
+
+
+# ---------------------------------------------------------------------------
+# Named selections
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def named(array):
+    """A context carrying one stored selection: the two atoms of chain B's LYS."""
+    pocket = select(array, "resn LYS")
+    return SelectionContext(array, named={"pocket": pocket})
+
+
+def test_a_name_resolves_to_its_stored_mask(array, named):
+    assert select(array, "pocket", named).tolist() == select(array, "resn LYS").tolist()
+
+
+def test_a_name_is_a_selection_like_any_other(array, named):
+    """The point of the feature: a stored pick composes with the language."""
+    assert count_in(array, "not pocket", named) == 6
+    assert count_in(array, "pocket and name NZ", named) == 1
+    assert count_in(array, "byres (name NZ)", named) == count_in(array, "pocket", named)
+    # The residue 10 A away, found from the stored selection alone.
+    assert count_in(array, "resn HOH within 10 of pocket", named) == 1
+
+
+def test_a_name_is_matched_regardless_of_case(array, named):
+    assert count_in(array, "POCKET", named) == 2
+
+
+def test_a_keyword_wins_over_a_name_of_its_own(array):
+    """A stored selection called `ligand` does not quietly redefine the macro."""
+    ctx = SelectionContext(array, named={"ligand": select(array, "chain A")})
+    assert count_in(array, "ligand", ctx) == 0  # the macro: no ligand here
+    assert count_in(array, "%ligand", ctx) == 5  # the stored selection
+
+
+def test_an_unknown_name_says_what_is_stored(array, named):
+    with pytest.raises(SelectionSyntaxError) as info:
+        select(array, "pockte around 4", named)
+    message = str(info.value)
+    assert "pockte" in message
+    assert "pocket" in message  # what was stored, offered as the alternative
+    assert "^" in message
+
+
+def test_an_unknown_name_without_any_stored_says_so(array):
+    with pytest.raises(SelectionSyntaxError, match="no stored selections"):
+        select(array, "pocket")
+
+
+def test_a_percent_needs_a_name(array):
+    with pytest.raises(SelectionSyntaxError, match="needs the name"):
+        select(array, "%")
+
+
+def test_a_stored_mask_of_the_wrong_length_is_not_used(array):
+    """It would address the wrong atoms; better to say the name is unknown."""
+    ctx = SelectionContext(array, named={"pocket": np.ones(3, dtype=bool)})
+    with pytest.raises(SelectionSyntaxError, match="pocket"):
+        select(array, "pocket", ctx)
+
+
+def test_a_name_is_resolved_per_structure_not_per_string(array, named):
+    """Compiling is cached across structures, so the name cannot bind at parse
+    time — the same string means different atoms on different molecules."""
+    selection = compile_selection("pocket")
+    other = SelectionContext(array, named={"pocket": select(array, "chain A")})
+    assert int(selection.evaluate(array, named).sum()) == 2
+    assert int(selection.evaluate(array, other).sum()) == 5
+
+
+def test_expand_and_describe_take_names_too(array, named):
+    grown = expand_selection(array, "pocket", "chain", named)
+    assert grown.tolist() == select(array, "chain B").tolist()
+    assert describe_selection(array, "pocket", named) == "chain B and resi 10"
 
 
 # ---------------------------------------------------------------------------

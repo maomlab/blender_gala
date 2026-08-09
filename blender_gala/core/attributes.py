@@ -2,8 +2,11 @@
 
 A named selection is nothing more than a boolean attribute on the ``POINT``
 domain, one value per atom. That is deliberately the same representation
-three other things already use:
+several other things already use:
 
+``The selection language``
+    a bare word that is not a keyword is looked up here, so ``pocket around 4``
+    means what it says (:func:`named_selections`).
 ``Molecular Nodes``
     ``Molecule.add_style(style, selection="pocket")`` wires a Named Attribute
     node into the style's ``Selection`` socket, so an alias can be styled
@@ -24,6 +27,7 @@ alias from the dozen booleans Molecular Nodes stores (``is_solvent``,
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 import numpy as np
@@ -32,6 +36,7 @@ __all__ = [
     "REGISTRY_KEY",
     "delete_boolean",
     "list_booleans",
+    "named_selections",
     "read_boolean",
     "register",
     "registered",
@@ -238,6 +243,71 @@ def unregister(obj: Any, name: str) -> None:
     """Forget ``name``, leaving the attribute itself alone."""
     names = [str(existing) for existing in obj.get(REGISTRY_KEY, ())]
     obj[REGISTRY_KEY] = [existing for existing in names if existing != name]
+
+
+# ---------------------------------------------------------------------------
+# Aliases as selection-language names
+# ---------------------------------------------------------------------------
+
+
+class _BooleanAttributes(Mapping):
+    """The mesh's boolean attributes, read one at a time as they are asked for.
+
+    Backs the names a selection string may refer to. Reading every attribute
+    up front would be wasteful — ``pocket around 4`` needs one of them — and in
+    Edit Mode a read walks the BMesh vertex by vertex, so each mask is fetched
+    only when it is named, and then kept for the life of this mapping.
+
+    Registered aliases come first, but the plain boolean attributes are here
+    too: a selection imported from a PyMOL session, or one wired up by hand in
+    the geometry node editor, is just as referenceable as one Gala stored.
+    """
+
+    def __init__(self, obj: Any, n_atoms: int | None = None) -> None:
+        self._obj = obj
+        self._n_atoms = n_atoms
+        self._masks: dict[str, np.ndarray | None] = {}
+
+    def _names(self) -> list[str]:
+        aliases = registered(self._obj)
+        return aliases + [n for n in list_booleans(self._obj) if n not in aliases]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._names())
+
+    def __len__(self) -> int:
+        return len(self._names())
+
+    def __getitem__(self, key: str) -> np.ndarray:
+        if key not in self._masks:
+            self._masks[key] = read_boolean(self._obj, key, self._n_atoms)
+        mask = self._masks[key]
+        if mask is None:
+            raise KeyError(key)
+        return mask
+
+
+def named_selections(target: Any, n_atoms: int | None = None) -> Mapping[str, Any]:
+    """The named selections ``target`` can resolve, as a lazy ``{name: mask}``.
+
+    Parameters
+    ----------
+    target : Molecule, bpy.types.Object, AtomStructure, or AtomArray
+        Whatever the caller had. Anything without a mesh behind it — a bare
+        biotite ``AtomArray``, say — has no names, and gets an empty mapping.
+    n_atoms : int, optional
+        Expected mask length. Attributes of another length are left out rather
+        than returned to address the wrong atoms.
+
+    Returns
+    -------
+    Mapping
+        Names in creation order, masks read on demand.
+    """
+    obj = getattr(target, "object", None)
+    if obj is None and _mesh(target) is not None:
+        obj = target
+    return _BooleanAttributes(obj, n_atoms) if obj is not None else {}
 
 
 _UNSAFE = re.compile(r"[^0-9A-Za-z_]+")
