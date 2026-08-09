@@ -187,6 +187,14 @@ it:
 | GitHub Actions | commit SHAs, with the release named beside them | the workflow |
 | The runner image | `ubuntu-24.04`, not `ubuntu-latest` | the workflow |
 
+Installing it from a file has three traps, all of which will make a broken
+install look like a green step: Blender refuses a relative filepath, it exits
+0 when a `--python-expr` raises, and `package_install_files` returns
+`FINISHED` even when extracting the archive failed. The workflow therefore
+uses an absolute path, catches the exception, and — the only check that
+actually proves anything — imports the extension afterwards through
+`require_mn()`.
+
 Molecular Nodes is the one worth understanding. `package_install` takes
 whatever the extensions repository currently offers, so a release changed what
 CI ran against with nothing committed here — and it backs every test that

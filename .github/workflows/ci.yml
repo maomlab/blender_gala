@@ -97,24 +97,47 @@ jobs:
           sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 \
             libgl1 libsm6 libegl1 libegl-mesa0
 
+      # Three things Blender does here can turn a failed install into a green
+      # step, and all three had to be worked around:
+      #
+      #  * it refuses a relative filepath outright, hence `$PWD`;
+      #  * it exits 0 when a `--python-expr` raises, so an uncaught exception is
+      #    invisible to the shell however much `set -e` is in force;
+      #  * `package_install_files` returns FINISHED even when extracting the
+      #    archive failed — it reports the error and carries on — so its return
+      #    value proves nothing.
+      #
+      # What does prove something is importing the thing afterwards, in the
+      # same session, through the resolver the tests and vignettes use. Failure
+      # goes out through `sys.exit`, which escapes where an exception does not.
       - name: Install Molecular Nodes ${{ env.MN_VERSION }}
         run: |
           set -euo pipefail
-          curl -fSL "https://extensions.blender.org/download/sha256:${MN_SHA256}/add-on-molecularnodes-v${MN_VERSION}-linux-x64.zip" -o mn.zip
-          echo "${MN_SHA256}  mn.zip" | sha256sum -c -
+          curl -fSL "https://extensions.blender.org/download/sha256:${MN_SHA256}/add-on-molecularnodes-v${MN_VERSION}-linux-x64.zip" -o "$PWD/mn.zip"
+          echo "${MN_SHA256}  $PWD/mn.zip" | sha256sum -c -
           ~/blender/blender --background --python-expr "
-          import bpy
-          bpy.ops.extensions.package_install_files(
-              filepath='mn.zip', repo='user_default', enable_on_install=True)
+          import bpy, sys
+          try:
+              bpy.ops.extensions.package_install_files(
+                  filepath='$PWD/mn.zip', repo='user_default', enable_on_install=True)
+          except Exception as exc:
+              sys.exit(f'Molecular Nodes did not install: {exc}')
           bpy.ops.wm.save_userpref()
+          sys.path.insert(0, '$PWD')
+          from blender_gala.core import mn
+          try:
+              print('Molecular Nodes:', mn.require_mn().__name__)
+          except Exception as exc:
+              sys.exit(f'Molecular Nodes did not install: {exc}')
           "
 
+      # The install step already imported it; this checks that it survived
+      # into a new process, which is what every step after this one depends on.
       # Through Gala's own resolver rather than a hard-coded module path: an
       # extension installed from a file lands under `bl_ext.user_default`
       # rather than `bl_ext.blender_org`, and `require_mn` is what the tests
-      # and vignettes call anyway. Blender exits 0 when a --python-expr
-      # raises, so this warns rather than trusting an exit code.
-      - name: Molecular Nodes is importable
+      # and vignettes call anyway.
+      - name: Molecular Nodes survived into a new session
         run: |
           ~/blender/blender --background --python-expr "
           import sys
@@ -179,22 +202,44 @@ jobs:
           sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 \
             libgl1 libsm6 libegl1 libegl-mesa0
 
+      # Three things Blender does here can turn a failed install into a green
+      # step, and all three had to be worked around:
+      #
+      #  * it refuses a relative filepath outright, hence `$PWD`;
+      #  * it exits 0 when a `--python-expr` raises, so an uncaught exception is
+      #    invisible to the shell however much `set -e` is in force;
+      #  * `package_install_files` returns FINISHED even when extracting the
+      #    archive failed — it reports the error and carries on — so its return
+      #    value proves nothing.
+      #
+      # What does prove something is importing the thing afterwards, in the
+      # same session, through the resolver the tests and vignettes use. Failure
+      # goes out through `sys.exit`, which escapes where an exception does not.
       - name: Install Molecular Nodes ${{ env.MN_VERSION }}
         run: |
           set -euo pipefail
-          curl -fSL "https://extensions.blender.org/download/sha256:${MN_SHA256}/add-on-molecularnodes-v${MN_VERSION}-linux-x64.zip" -o mn.zip
-          echo "${MN_SHA256}  mn.zip" | sha256sum -c -
+          curl -fSL "https://extensions.blender.org/download/sha256:${MN_SHA256}/add-on-molecularnodes-v${MN_VERSION}-linux-x64.zip" -o "$PWD/mn.zip"
+          echo "${MN_SHA256}  $PWD/mn.zip" | sha256sum -c -
           ~/blender/blender --background --python-expr "
-          import bpy
-          bpy.ops.extensions.package_install_files(
-              filepath='mn.zip', repo='user_default', enable_on_install=True)
+          import bpy, sys
+          try:
+              bpy.ops.extensions.package_install_files(
+                  filepath='$PWD/mn.zip', repo='user_default', enable_on_install=True)
+          except Exception as exc:
+              sys.exit(f'Molecular Nodes did not install: {exc}')
           bpy.ops.wm.save_userpref()
+          sys.path.insert(0, '$PWD')
+          from blender_gala.core import mn
+          try:
+              print('Molecular Nodes:', mn.require_mn().__name__)
+          except Exception as exc:
+              sys.exit(f'Molecular Nodes did not install: {exc}')
           "
 
       # As in the test job, but fatal: a vignette cannot run without Molecular
       # Nodes, so there is nothing to be gained by discovering that one script
       # at a time.
-      - name: Molecular Nodes is importable
+      - name: Molecular Nodes survived into a new session
         run: |
           ~/blender/blender --background --python-expr "
           import sys
