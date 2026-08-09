@@ -142,7 +142,9 @@ def write_selection(obj: Any, mask: np.ndarray) -> None:
         # Without the flush, edges and faces between newly selected vertices
         # stay unselected and the mesh redraws inconsistently.
         edit_mesh.select_flush_mode()
-        bmesh.update_edit_mesh(obj.data)
+        # Not `destructive`: selecting changes no geometry, and saying it does
+        # makes Blender rebuild the edit mesh under the modifier for nothing.
+        bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
         return
 
     mesh = getattr(obj, "data", None)

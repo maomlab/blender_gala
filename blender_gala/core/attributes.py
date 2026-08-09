@@ -49,6 +49,19 @@ def _mesh(obj: Any) -> Any:
     return data if getattr(data, "attributes", None) is not None else None
 
 
+def _flush(bmesh: Any, obj: Any) -> None:
+    """Push BMesh edits back to the mesh without claiming a rebuild.
+
+    ``update_edit_mesh`` defaults to ``destructive=True``, which announces that
+    geometry has been added or removed. Storing attribute values changes
+    neither, and saying otherwise makes Blender tear down and rebuild the edit
+    mesh — needless work on a structure with tens of thousands of atoms, and
+    enough to leave what a geometry nodes modifier is drawing in Edit Mode out
+    of step with the atoms underneath it.
+    """
+    bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+
+
 def _bmesh_layer(obj: Any, name: str, create: bool) -> tuple[Any, Any] | None:
     """Return ``(bmesh, layer)`` when ``obj`` is in Edit Mode, else ``None``.
 
@@ -131,7 +144,7 @@ def write_boolean(obj: Any, name: str, mask: np.ndarray) -> None:
         mesh.verts.ensure_lookup_table()
         for vertex, value in zip(mesh.verts, mask, strict=True):
             vertex[layer] = bool(value)
-        bmesh.update_edit_mesh(obj.data)
+        _flush(bmesh, obj)
         return
 
     mesh_data = _mesh(obj)
@@ -165,7 +178,7 @@ def delete_boolean(obj: Any, name: str) -> bool:
 
         mesh, layer = found
         mesh.verts.layers.bool.remove(layer)
-        bmesh.update_edit_mesh(obj.data)
+        _flush(bmesh, obj)
         return True
 
     mesh_data = _mesh(obj)
