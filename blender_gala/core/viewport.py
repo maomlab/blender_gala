@@ -18,11 +18,53 @@ whatever was selected when the mode was last toggled.
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
 
-__all__ = ["is_selectable", "read_selection", "selected_indices", "write_selection"]
+__all__ = [
+    "is_selectable",
+    "object_mode",
+    "read_selection",
+    "selected_indices",
+    "write_selection",
+]
+
+
+@contextlib.contextmanager
+def object_mode(obj: Any) -> Iterator[None]:
+    """Run a block in Object Mode, and put the user back where they were.
+
+    Some of what Gala calls cannot run from Edit Mode at all. Appending a
+    Molecular Nodes style is the one that matters here: it reaches for
+    ``bpy.ops.wm.append`` to pull the node group out of the add-on's asset
+    file, and that operator's poll fails outside Object Mode — so styling a
+    selection would fail precisely when it is most useful, straight after
+    picking the atoms.
+
+    Leaving and re-entering Edit Mode preserves the vertex selection, so the
+    round trip is invisible apart from the viewport blinking.
+    """
+    mode = getattr(obj, "mode", "OBJECT")
+    if obj is None or mode == "OBJECT":
+        yield
+        return
+
+    import bpy
+
+    view_layer = bpy.context.view_layer
+    previous = view_layer.objects.active
+    view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode="OBJECT")
+    try:
+        yield
+    finally:
+        view_layer.objects.active = obj
+        bpy.ops.object.mode_set(mode=mode)
+        if previous is not None:
+            view_layer.objects.active = previous
 
 
 def is_selectable(obj: Any) -> bool:

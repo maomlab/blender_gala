@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-from . import attributes
+from . import attributes, viewport
 from .entity import AtomStructure
 from .exceptions import StructureError
 from .selection import LEVELS, Selection
@@ -259,7 +259,12 @@ def style_alias(
         kwargs["color"] = color
     if material is not None:
         kwargs["material"] = material
-    molecule.add_style(**kwargs)
+
+    # Molecular Nodes appends the style's node group with `wm.append`, which
+    # will not run from Edit Mode — and Edit Mode is where the user is when
+    # they have just picked the atoms they want styled.
+    with viewport.object_mode(structure.object):
+        molecule.add_style(**kwargs)
     return molecule
 
 

@@ -1277,12 +1277,18 @@ def test_the_molecular_nodes_panel_guard_is_reversible(registered):
     wrapper = panel.panel_selection_node
     mn_compat.remove()
 
+    # What it put back is whatever was there before — Molecular Nodes' own
+    # function normally, but another copy of this same shim when the extension
+    # is installed *and* a checkout is on sys.path, which is the ordinary
+    # developer setup (SPECIFICATION D-2a). The invariant is that removing
+    # restores what installing found, not that it restores any one function.
     restored = panel.panel_selection_node
     assert restored is not wrapper
-    assert restored.__module__.endswith("molecularnodes.ui.panel")
 
     assert mn_compat.install() is True
     assert panel.panel_selection_node is not restored
+    mn_compat.remove()
+    assert panel.panel_selection_node is restored
 
 
 def test_every_icon_named_in_the_ui_exists(registered):
@@ -1309,3 +1315,44 @@ def test_every_icon_named_in_the_ui_exists(registered):
         if icon not in known
     }
     assert unknown == set()
+
+
+@requires_mn
+def test_style_alias_works_from_edit_mode(clean_scene, site_molecule):
+    """Molecular Nodes appends the style's node group with `wm.append`, whose
+    poll fails outside Object Mode — and Edit Mode is exactly where the user
+    is when they have just picked the atoms they want styled."""
+    import bpy
+
+    import blender_gala as gala
+
+    site_molecule.add_style("cartoon")
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+    gala.create_alias(site_molecule, "lig")
+
+    with edit_mode(site_molecule.object):
+        assert bpy.ops.wm.append.poll() is False, "the premise no longer holds"
+        gala.style_alias(site_molecule, "lig", style="ball_and_stick")
+
+        # Put back where they were, with the selection intact.
+        assert site_molecule.object.mode == "EDIT"
+        assert int(gala.viewport_selection(site_molecule).sum()) == 9
+
+    styles = [node.name for node in site_molecule.tree.nodes if "Style" in node.name]
+    assert "Style Ball and Stick" in styles
+
+
+@requires_mn
+def test_object_mode_restores_the_active_object(clean_scene, site_molecule):
+    import bpy
+
+    from blender_gala.core import viewport
+
+    other = bpy.data.objects.new("bystander", None)
+    clean_scene.collection.objects.link(other)
+
+    with edit_mode(site_molecule.object):
+        bpy.context.view_layer.objects.active = site_molecule.object
+        with viewport.object_mode(site_molecule.object):
+            assert site_molecule.object.mode == "OBJECT"
+        assert site_molecule.object.mode == "EDIT"
