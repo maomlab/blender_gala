@@ -87,6 +87,13 @@ plugins:
 
 markdown_extensions:
   - admonition
+  # The front page's card grid labels each link with an icon, written
+  # `:material-camera:`. Those are emoji shortcodes as far as Markdown is
+  # concerned, and without this extension they are not markup at all — they
+  # pass straight through and the page shows the literal text.
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - attr_list
   - md_in_html
   - toc:
