@@ -49,8 +49,8 @@ dev = [
 # `apbs-binary` is the upstream APBS 3.4.1 build repackaged as a wheel
 # (deargen/py-apbs-binary, Apache-2.0); `pdb2pqr` is the real thing.
 apbs = [
-    "apbs-binary>=3.4.1",
-    "pdb2pqr>=3.6",
+    "apbs-binary==3.4.1.1",
+    "pdb2pqr==3.7.1",
 ]
 # Pinned for the same reason as the `dev` tools, and with one addition: the
 # site is built with `--strict`, so a warning a new release decides to emit is

@@ -20,7 +20,11 @@ import sys
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEPS_DIR = os.path.join(REPO_ROOT, ".blender-deps")
 
-PACKAGES = ["pytest>=8.0", "pytest-cov>=5.0"]
+# Pinned, like everything else CI depends on: this runs inside Blender's own
+# Python, where an upgrade cannot be undone by recreating a venv, and a pytest
+# that changes its collection or its assertion rewriting turns the suite red
+# with nothing committed here.
+PACKAGES = ["pytest==9.1.1", "pytest-cov==7.1.0"]
 
 
 def python_executable() -> str:

@@ -6,6 +6,20 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Molecular Nodes is the dependency most able to break this repository — it
+# backs every test that touches a molecule and every vignette — and
+# `package_install` takes whatever the extensions repository currently offers,
+# so a release changes what CI runs against with nothing committed here.
+#
+# The platform's download URLs are content addressed: this hash *is* the
+# version, and the bytes behind it cannot change. To move to a newer Molecular
+# Nodes, take `archive_hash` for the linux-x64 build from
+# https://extensions.blender.org/api/v1/extensions/?platform=linux-x64 and
+# raise both of these together.
+env:
+  MN_VERSION: "4.5.13"
+  MN_SHA256: "c83390ffd2fc219f49ea2d4f18198f18da8cbf9bb3d7ff1b69ae871d379f29cc"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -13,11 +27,11 @@ concurrency:
 jobs:
   quality:
     name: Lint and type check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
@@ -44,7 +58,7 @@ jobs:
 
   test:
     name: Test on Blender ${{ matrix.blender }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -53,11 +67,11 @@ jobs:
         # whole feature set.
         blender: ["5.1.2", "5.2.0"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Cache Blender
         id: cache-blender
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/blender
           key: blender-${{ matrix.blender }}-linux-x64
@@ -83,22 +97,31 @@ jobs:
           sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 \
             libgl1 libsm6 libegl1 libegl-mesa0
 
-      # --online-mode is required: Blender refuses to reach the extensions
-      # repository without it, package_install fails its poll, and nothing is
-      # installed. Blender also exits 0 when a --python-expr raises,
-      # so neither the `||` below nor the exit code can be trusted — the check
-      # afterwards is what actually tells us whether it worked.
-      - name: Install Molecular Nodes
+      - name: Install Molecular Nodes ${{ env.MN_VERSION }}
         run: |
-          ~/blender/blender --background --online-mode --python-expr "
-          import bpy
-          bpy.ops.extensions.repo_sync(repo_index=0)
-          bpy.ops.extensions.package_install(repo_index=0, pkg_id='molecularnodes')
-          bpy.ops.wm.save_userpref()
-          " || true
+          set -euo pipefail
+          curl -fSL "https://extensions.blender.org/download/sha256:${MN_SHA256}/add-on-molecularnodes-v${MN_VERSION}-linux-x64.zip" -o mn.zip
+          echo "${MN_SHA256}  mn.zip" | sha256sum -c -
           ~/blender/blender --background --python-expr "
+          import bpy
+          bpy.ops.extensions.package_install_files(
+              filepath='mn.zip', repo='user_default', enable_on_install=True)
+          bpy.ops.wm.save_userpref()
+          "
+
+      # Through Gala's own resolver rather than a hard-coded module path: an
+      # extension installed from a file lands under `bl_ext.user_default`
+      # rather than `bl_ext.blender_org`, and `require_mn` is what the tests
+      # and vignettes call anyway. Blender exits 0 when a --python-expr
+      # raises, so this warns rather than trusting an exit code.
+      - name: Molecular Nodes is importable
+        run: |
+          ~/blender/blender --background --python-expr "
+          import sys
+          sys.path.insert(0, '.')
           try:
-              import bl_ext.blender_org.molecularnodes  # noqa: F401
+              from blender_gala.core import mn
+              print('Molecular Nodes:', mn.require_mn().__name__)
           except Exception as exc:
               print(f'::warning::Molecular Nodes did not install ({exc}); its tests will skip.')
           "
@@ -120,21 +143,21 @@ jobs:
 
       - name: Upload the extension
         if: matrix.blender == '5.2.0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: blender-gala-extension
           path: dist/*.zip
 
   vignettes:
     name: Run the vignettes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Cache Blender
         id: cache-blender
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/blender
           key: blender-5.2.0-linux-x64
@@ -156,21 +179,29 @@ jobs:
           sudo apt-get install -y libxi6 libxxf86vm1 libxfixes3 libxrender1 \
             libgl1 libsm6 libegl1 libegl-mesa0
 
+      - name: Install Molecular Nodes ${{ env.MN_VERSION }}
+        run: |
+          set -euo pipefail
+          curl -fSL "https://extensions.blender.org/download/sha256:${MN_SHA256}/add-on-molecularnodes-v${MN_VERSION}-linux-x64.zip" -o mn.zip
+          echo "${MN_SHA256}  mn.zip" | sha256sum -c -
+          ~/blender/blender --background --python-expr "
+          import bpy
+          bpy.ops.extensions.package_install_files(
+              filepath='mn.zip', repo='user_default', enable_on_install=True)
+          bpy.ops.wm.save_userpref()
+          "
+
       # As in the test job, but fatal: a vignette cannot run without Molecular
       # Nodes, so there is nothing to be gained by discovering that one script
       # at a time.
-      - name: Install Molecular Nodes
+      - name: Molecular Nodes is importable
         run: |
-          ~/blender/blender --background --online-mode --python-expr "
-          import bpy
-          bpy.ops.extensions.repo_sync(repo_index=0)
-          bpy.ops.extensions.package_install(repo_index=0, pkg_id='molecularnodes')
-          bpy.ops.wm.save_userpref()
-          " || true
           ~/blender/blender --background --python-expr "
           import sys
+          sys.path.insert(0, '.')
           try:
-              import bl_ext.blender_org.molecularnodes  # noqa: F401
+              from blender_gala.core import mn
+              print('Molecular Nodes:', mn.require_mn().__name__)
           except Exception as exc:
               sys.exit(f'Molecular Nodes did not install: {exc}')
           "
@@ -181,7 +212,7 @@ jobs:
       - name: Install APBS and PDB2PQR
         run: |
           set -euo pipefail
-          python -m pip install --upgrade apbs-binary pdb2pqr
+          python -m pip install -e ".[apbs]"
           package=$(python -c "import apbs_binary, os; print(os.path.dirname(apbs_binary.__file__))")
           mkdir -p ~/.local/bin
           printf '#!/bin/sh\nexport LD_LIBRARY_PATH="%s/lib:$LD_LIBRARY_PATH"\nexec "%s/bin/apbs" "$@"\n' \
@@ -207,18 +238,18 @@ jobs:
           done
 
       - name: Upload the rendered images
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vignette-images
           path: docs/images/
 
   docs:
     name: Build the documentation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip

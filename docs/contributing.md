@@ -175,6 +175,34 @@ several lines and it needs Black or Ruff installed to do it. Without one it
 says so at INFO level, which `--strict` does not catch, and renders
 `publication_setup`'s seventeen parameters as one unbroken line.
 
+Everything else CI reaches for is pinned the same way, in the place that owns
+it:
+
+| What | Pinned as | Where |
+| --- | --- | --- |
+| Blender | an explicit version in the download URL | the workflow's matrix |
+| Molecular Nodes | a content-addressed archive, checksummed after download | `MN_VERSION` / `MN_SHA256` |
+| APBS and PDB2PQR | exact versions | the `apbs` extra |
+| pytest | exact versions | `scripts/install_deps.py` |
+| GitHub Actions | commit SHAs, with the release named beside them | the workflow |
+| The runner image | `ubuntu-24.04`, not `ubuntu-latest` | the workflow |
+
+Molecular Nodes is the one worth understanding. `package_install` takes
+whatever the extensions repository currently offers, so a release changed what
+CI ran against with nothing committed here — and it backs every test that
+touches a molecule and every vignette. The platform's download URLs are
+content addressed, so the hash *is* the version: take `archive_hash` for the
+linux-x64 build from
+`https://extensions.blender.org/api/v1/extensions/?platform=linux-x64` and
+raise `MN_VERSION` and `MN_SHA256` together. Installed from a file it lands
+under `bl_ext.user_default` rather than `bl_ext.blender_org`, which is why CI
+checks for it through `require_mn()` — the resolver the tests and vignettes
+use — rather than a hard-coded module path.
+
+The apt packages Blender needs are not pinned. Ubuntu's archive drops old
+versions, so a pin there fails on the archive's schedule rather than on
+anyone's decision, which is the opposite of the point.
+
 To bump any of them, raise the pin, run `make lint typecheck docs`, and fix
 what the new version has found in the same commit. Then the failure arrives
 when someone is looking at it.
