@@ -237,14 +237,19 @@ class GALA_PT_named_selections(_GalaPanel):
         column = layout.column(align=True)
         column.enabled = bool(gala_attributes.registered(obj))
 
+        # Written out rather than looped: the icon argument is a literal enum,
+        # so a variable carrying the name is not a valid icon as far as the
+        # type checker is concerned — and a literal at the call site is what
+        # the test that verifies every icon exists looks for.
         row = column.row(align=True)
         row.operator("gala.select_alias", icon="RESTRICT_SELECT_OFF")
-        for mode, icon in (
-            ("union", "SELECT_EXTEND"),
-            ("intersect", "SELECT_INTERSECT"),
-            ("subtract", "SELECT_SUBTRACT"),
-        ):
-            row.operator("gala.alias_boolean", text="", icon=icon).mode = mode
+        row.operator("gala.alias_boolean", text="", icon="SELECT_EXTEND").mode = "union"
+        row.operator(
+            "gala.alias_boolean", text="", icon="SELECT_INTERSECT"
+        ).mode = "intersect"
+        row.operator(
+            "gala.alias_boolean", text="", icon="SELECT_SUBTRACT"
+        ).mode = "subtract"
         row.operator("gala.delete_alias", text="", icon="X")
 
         column.separator()

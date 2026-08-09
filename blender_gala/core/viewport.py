@@ -87,17 +87,19 @@ def write_selection(obj: Any, mask: np.ndarray) -> None:
     if getattr(obj, "mode", "OBJECT") == "EDIT":
         import bmesh
 
-        mesh = bmesh.from_edit_mesh(obj.data)
-        if len(mask) != len(mesh.verts):
+        # Named apart from the mesh datablock below: the same name for both
+        # would give the two branches one variable of two unrelated types.
+        edit_mesh = bmesh.from_edit_mesh(obj.data)
+        if len(mask) != len(edit_mesh.verts):
             raise ValueError(
                 f"mask has {len(mask)} values but the mesh has "
-                f"{len(mesh.verts)} vertices"
+                f"{len(edit_mesh.verts)} vertices"
             )
-        for vertex, value in zip(mesh.verts, mask, strict=True):
+        for vertex, value in zip(edit_mesh.verts, mask, strict=True):
             vertex.select = bool(value)
         # Without the flush, edges and faces between newly selected vertices
         # stay unselected and the mesh redraws inconsistently.
-        mesh.select_flush_mode()
+        edit_mesh.select_flush_mode()
         bmesh.update_edit_mesh(obj.data)
         return
 
@@ -120,9 +122,9 @@ def write_selection(obj: Any, mask: np.ndarray) -> None:
     # is the same rule Blender itself applies, so the flush becomes a no-op.
     edges = mesh.edges
     if len(edges):
-        pairs = np.empty(len(edges) * 2, dtype=np.int32)
-        edges.foreach_get("vertices", pairs)
-        pairs = pairs.reshape(-1, 2)
+        flat = np.empty(len(edges) * 2, dtype=np.int32)
+        edges.foreach_get("vertices", flat)
+        pairs = flat.reshape(-1, 2)
         edges.foreach_set("select", mask[pairs[:, 0]] & mask[pairs[:, 1]])
 
     # Molecules have no faces, so this loop normally does not run at all.
