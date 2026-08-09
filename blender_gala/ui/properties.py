@@ -21,6 +21,7 @@ from bpy.types import PropertyGroup
 from ..color import colormaps
 from ..core.registration import register_classes, unregister_classes
 from ..interactions.detect import INTERACTION_KINDS
+from ..ops import operators
 from ..scene import lighting, materials, presets
 
 __all__ = ["GalaSceneProperties", "classes"]
@@ -175,6 +176,49 @@ class GalaSceneProperties(PropertyGroup):
     depth_cue_far: FloatProperty(name="Far", default=100.0)
     exr_directory: StringProperty(
         name="EXR Directory", subtype="DIR_PATH", default="//passes"
+    )
+
+    # -- interactive selection ------------------------------------------
+    selection_level: EnumProperty(
+        name="Level",
+        description=(
+            "How far to grow the atoms selected in Edit Mode. The same levels "
+            "PyMOL switches between when you click"
+        ),
+        items=list(operators.LEVEL_ITEMS),
+        default="residue",
+    )
+    selection_text: StringProperty(
+        name="Syntax",
+        description=(
+            "The selected atoms as a PyMOL selection. Editable: type one and "
+            "press Select to see what it covers"
+        ),
+        default="",
+    )
+    alias_name: StringProperty(
+        name="Name",
+        description=(
+            "What to call the stored selection. It becomes a boolean attribute "
+            "on the mesh, which Molecular Nodes styles and PyMOL sessions read"
+        ),
+        default="sele",
+    )
+    alias_style: EnumProperty(
+        name="Style",
+        description="The Molecular Nodes style to apply to the stored selection",
+        items=list(operators.STYLE_ITEMS),
+        default="ball_and_stick",
+    )
+    alias_color: EnumProperty(
+        name="Colour",
+        description="How to colour the new style branch",
+        items=[
+            ("common", "Element", "Colour by element, as Molecular Nodes does"),
+            ("chain", "Chain", "One colour per chain"),
+            ("none", "Keep", "Leave the colour to the existing attribute"),
+        ],
+        default="common",
     )
 
     # -- interactions ---------------------------------------------------
@@ -333,12 +377,22 @@ def register() -> None:
     """Register the property group and attach it to Scene."""
     register_classes(classes)
     bpy.types.Scene.gala = bpy.props.PointerProperty(type=GalaSceneProperties)
+    # Which stored selection the sidebar list is pointing at. It lives on the
+    # object rather than the scene because the selections do: two molecules in
+    # one scene each have their own.
+    bpy.types.Object.gala_selection_index = bpy.props.IntProperty(
+        name="Active Selection", default=0, min=0
+    )
 
 
 def unregister() -> None:
     """Detach and unregister the property group."""
-    if hasattr(bpy.types.Scene, "gala"):
-        # Another copy of the add-on may already have removed it.
-        with contextlib.suppress(AttributeError, RuntimeError):
-            del bpy.types.Scene.gala
+    for owner, attribute in (
+        (bpy.types.Scene, "gala"),
+        (bpy.types.Object, "gala_selection_index"),
+    ):
+        if hasattr(owner, attribute):
+            # Another copy of the add-on may already have removed it.
+            with contextlib.suppress(AttributeError, RuntimeError):
+                delattr(owner, attribute)
     unregister_classes(classes)

@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from bpy.types import Panel
+from bpy.types import Panel, UIList
 
+from ..core import attributes as gala_attributes
 from ..core import mn as mn_bridge
 from ..core.registration import register_classes, unregister_classes
 
@@ -138,6 +139,119 @@ class GALA_PT_compositing(_GalaPanel):
 
         layout.operator("gala.setup_compositor", icon="NODE_COMPOSITING")
         layout.operator("gala.render", icon="RENDER_STILL")
+
+
+class GALA_UL_selections(UIList):
+    """The stored selections on the active molecule.
+
+    Drawn over ``mesh.attributes`` rather than over a list of Gala's own: a
+    stored selection *is* a boolean attribute, so listing the attributes
+    directly means the panel can never disagree with what the mesh carries.
+    Everything that is not one of Gala's is filtered out — Molecular Nodes
+    keeps a dozen booleans of its own on the same mesh.
+    """
+
+    def draw_item(
+        self, context, layout, data, item, icon, active_data, active_prop, index
+    ):
+        row = layout.row(align=True)
+        row.label(text=item.name, icon="RESTRICT_SELECT_OFF")
+
+    def filter_items(self, context, data, propname):
+        items = getattr(data, propname)
+        stored = set(gala_attributes.registered(context.active_object))
+        query = self.filter_name.lower()
+
+        flags = [0] * len(items)
+        for index, item in enumerate(items):
+            if item.name not in stored:
+                continue
+            if query and (query in item.name.lower()) is self.use_filter_invert:
+                continue
+            flags[index] |= self.bitflag_filter_item
+        return flags, []
+
+
+class GALA_PT_selection(_GalaPanel):
+    """Pick atoms in Edit Mode, then grow, read out or name what you picked."""
+
+    bl_idname = "GALA_PT_selection"
+    bl_label = "Selection"
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.gala
+        obj = context.active_object
+
+        if obj is None or obj.mode != "EDIT":
+            layout.label(text="Tab into Edit Mode to pick atoms", icon="INFO")
+
+        column = layout.column(align=True)
+        column.label(text="Expand to:")
+        column.row(align=True).prop(props, "selection_level", expand=True)
+        expand = column.operator("gala.expand_selection", icon="SELECT_EXTEND")
+        expand.level = props.selection_level
+
+        layout.separator()
+        column = layout.column(align=True)
+        column.label(text="Syntax:")
+        column.prop(props, "selection_text", text="")
+        row = column.row(align=True)
+        row.operator("gala.selection_to_text", icon="FILE_REFRESH")
+        row.operator("gala.copy_selection_text", text="", icon="COPYDOWN")
+        row.operator("gala.text_to_selection", icon="RESTRICT_SELECT_OFF")
+
+
+class GALA_PT_named_selections(_GalaPanel):
+    """The stored selections, and what to do with them."""
+
+    bl_idname = "GALA_PT_named_selections"
+    bl_parent_id = "GALA_PT_selection"
+    bl_label = "Stored Selections"
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.gala
+        obj = context.active_object
+        mesh = obj.data if obj is not None and obj.type == "MESH" else None
+
+        row = layout.row(align=True)
+        row.prop(props, "alias_name", text="")
+        row.operator("gala.create_alias", text="", icon="ADD").source = "viewport"
+        row.operator("gala.create_alias", text="", icon="SYNTAX_ON").source = "text"
+
+        if mesh is None:
+            layout.label(text="Select a molecule", icon="INFO")
+            return
+
+        layout.template_list(
+            "GALA_UL_selections",
+            "",
+            mesh,
+            "attributes",
+            obj,
+            "gala_selection_index",
+            rows=3,
+        )
+
+        column = layout.column(align=True)
+        column.enabled = bool(gala_attributes.registered(obj))
+
+        row = column.row(align=True)
+        row.operator("gala.select_alias", icon="RESTRICT_SELECT_OFF")
+        for mode, icon in (
+            ("union", "SELECT_EXTEND"),
+            ("intersect", "SELECT_INTERSECT"),
+            ("subtract", "SELECT_SUBTRACT"),
+        ):
+            row.operator("gala.alias_boolean", text="", icon=icon).mode = mode
+        row.operator("gala.delete_alias", text="", icon="X")
+
+        column.separator()
+        row = column.row(align=True)
+        row.prop(props, "alias_style", text="")
+        row.prop(props, "alias_color", text="")
+        column.operator("gala.style_alias", icon="SHADING_RENDERED")
 
 
 class GALA_PT_interactions(_GalaPanel):
@@ -286,6 +400,9 @@ classes = (
     GALA_PT_origin,
     GALA_PT_lighting,
     GALA_PT_compositing,
+    GALA_UL_selections,
+    GALA_PT_selection,
+    GALA_PT_named_selections,
     GALA_PT_interactions,
     GALA_PT_measure,
     GALA_PT_label,

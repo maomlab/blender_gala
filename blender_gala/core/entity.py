@@ -17,14 +17,22 @@ from typing import Any
 
 import numpy as np
 
+from . import attributes as gala_attributes
 from . import mn as mn_bridge
-from . import units
+from . import units, viewport
 from .exceptions import (
     AmbiguousSelectionError,
     EmptySelectionError,
     StructureError,
 )
-from .selection import Selection, SelectionContext, select, select_indices
+from .selection import (
+    Selection,
+    SelectionContext,
+    describe_selection,
+    expand_selection,
+    select,
+    select_indices,
+)
 
 try:  # pragma: no cover - exercised implicitly by the Blender test run
     import bpy
@@ -244,6 +252,123 @@ class AtomStructure:
     def count(self, selection: str | Selection | np.ndarray) -> int:
         """Return how many atoms ``selection`` matches."""
         return int(self.select(selection).sum())
+
+    def expand(
+        self, selection: str | Selection | np.ndarray, level: str = "residue"
+    ) -> np.ndarray:
+        """Grow ``selection`` to whole residues, chains or bonded fragments.
+
+        See :func:`blender_gala.core.selection.expand_selection`.
+        """
+        return expand_selection(self.array, selection, level, self.context)
+
+    def describe(self, selection: str | Selection | np.ndarray) -> str:
+        """Render ``selection`` as a PyMOL selection string.
+
+        See :func:`blender_gala.core.selection.describe_selection`.
+        """
+        return describe_selection(self.array, selection, self.context)
+
+    # ------------------------------------------------------------------
+    # Viewport selection
+    # ------------------------------------------------------------------
+    def viewport_selection(self) -> np.ndarray:
+        """Return the atoms selected in the viewport as a boolean mask.
+
+        Reads Edit Mode's vertex selection when the object is in Edit Mode,
+        and the stored flags otherwise. An all-false mask comes back when
+        there is no Blender object behind this structure.
+        """
+        return viewport.read_selection(self.object, self.n_atoms)
+
+    def set_viewport_selection(
+        self, selection: str | Selection | np.ndarray
+    ) -> np.ndarray:
+        """Select ``selection`` in the viewport, deselecting everything else.
+
+        Returns
+        -------
+        numpy.ndarray
+            The mask that was applied.
+
+        Raises
+        ------
+        StructureError
+            If this structure has no Blender object.
+        """
+        mask = self.select(selection)
+        if self.object is None:
+            raise StructureError(
+                "this structure has no Blender object, so there is no viewport "
+                "selection to set"
+            )
+        viewport.write_selection(self.object, mask)
+        return mask
+
+    # ------------------------------------------------------------------
+    # Named selections
+    # ------------------------------------------------------------------
+    def alias_names(self) -> list[str]:
+        """The names of the aliases stored on this structure's object."""
+        return gala_attributes.registered(self.object)
+
+    def aliases(self) -> dict[str, np.ndarray]:
+        """Every stored alias, as ``{name: mask}``."""
+        return {
+            name: mask
+            for name in self.alias_names()
+            if (mask := gala_attributes.read_boolean(self.object, name, self.n_atoms))
+            is not None
+        }
+
+    def alias(self, name: str) -> np.ndarray:
+        """Return one alias as a mask.
+
+        Raises
+        ------
+        KeyError
+            If there is no alias of that name.
+        """
+        mask = gala_attributes.read_boolean(self.object, name, self.n_atoms)
+        if mask is None:
+            raise KeyError(f"no selection named {name!r} on {self.name!r}")
+        return mask
+
+    def store_alias(
+        self, name: str, selection: str | Selection | np.ndarray
+    ) -> np.ndarray:
+        """Store ``selection`` as a named boolean attribute on the mesh.
+
+        The attribute is what Molecular Nodes reads when a style is limited to
+        a selection, and what :func:`blender_gala.save_session` writes out as
+        a PyMOL selection.
+
+        Returns
+        -------
+        numpy.ndarray
+            The stored mask.
+
+        Raises
+        ------
+        StructureError
+            If this structure has no Blender object.
+        """
+        mask = self.select(selection)
+        if self.object is None:
+            raise StructureError(
+                "this structure has no Blender object, so a named selection has "
+                "nowhere to live"
+            )
+        gala_attributes.write_boolean(self.object, name, mask)
+        gala_attributes.register(self.object, name)
+        return mask
+
+    def delete_alias(self, name: str) -> bool:
+        """Remove a stored alias. Returns whether there was one."""
+        if self.object is None:
+            return False
+        gala_attributes.unregister(self.object, name)
+        return gala_attributes.delete_boolean(self.object, name)
 
     def one_index(
         self,

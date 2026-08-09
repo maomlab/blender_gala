@@ -34,6 +34,40 @@ The EXR directory shows red because its default, `//passes`, is relative to the
 *Set Up Compositor* builds the node graph shown in the
 [compositing guide](compositing.md); *Render Still* renders through it.
 
+### Selection
+
+Tab into Edit Mode and pick atoms with Blender's own tools — click, box (`B`),
+circle (`C`) or lasso. The panel then does the three things Blender has no
+notion of, because they are chemical rather than geometric.
+
+*Expand* grows what you picked to whole residues, chains or bonded fragments,
+the way PyMOL's selection levels do. Pressing it again grows the result
+further. The same three expansions are in **Select ▸ Expand to Residue** while
+you are in Edit Mode, which is where you will already be.
+
+The *Syntax* box reads the selection back as PyMOL syntax — *From Selection*
+fills it in, the copy button puts it on the clipboard, and *Select* runs it in
+the other direction so you can see what a typed selection covers before using
+it in a figure.
+
+![The Selection panel](../images/ui/selection.webp){ width="250" }
+
+#### Stored Selections
+
+Naming a selection stores it as a boolean attribute on the mesh, which is what
+Molecular Nodes reads when a style is limited to a selection and what a saved
+`.pse` carries as a PyMOL selection. Type a name and press **+** to store what
+is selected, or the syntax button beside it to store what is in the *Syntax*
+box.
+
+The list below shows what is stored. The buttons under it select a stored
+selection, add the current pick to it, intersect it, subtract from it, or
+delete it. *Apply Style* adds a Molecular Nodes style covering only that
+selection and leaves the existing styles alone — this is how a pocket gets
+ball-and-stick while the rest of the protein stays a cartoon.
+
+![The Stored Selections sub-panel](../images/ui/selection-stored.webp){ width="250" }
+
 ### Interactions
 
 Two selection fields and a grid of interaction types. *Find Interactions*

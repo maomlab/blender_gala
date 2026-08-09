@@ -29,14 +29,22 @@ from . import chemistry
 from .exceptions import SelectionSyntaxError
 
 __all__ = [
+    "LEVELS",
     "MACRO_KEYWORDS",
     "PROPERTY_KEYWORDS",
     "Selection",
     "SelectionContext",
     "compile_selection",
+    "describe_selection",
+    "expand_selection",
     "select",
     "select_indices",
 ]
+
+#: Selection levels, from finest to coarsest. These are what PyMOL's selection
+#: mode buttons switch between: a click gives you an atom, and the level grows
+#: it to the residue, chain or bonded fragment that atom belongs to.
+LEVELS = ("atom", "residue", "chain", "fragment", "object")
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +168,54 @@ class SelectionContext:
             self._cache["chain_key"] = inverse
         return self._cache["chain_key"]
 
+    @property
+    def fragment_key(self) -> np.ndarray:
+        """Integer id that is constant within a bonded fragment.
+
+        This is the level PyMOL calls a *molecule*: the connected component of
+        the bond graph, so picking one atom of a ligand can grow to the whole
+        ligand without going through its residue. Structures that arrived
+        without a bond list fall back to the chain, which is the closest
+        honest answer for a polymer.
+        """
+        if "fragment_key" not in self._cache:
+            self._cache["fragment_key"] = self._connected_components()
+        return self._cache["fragment_key"]
+
+    def _connected_components(self) -> np.ndarray:
+        edges = self._bond_edges()
+        if edges.size == 0:
+            return self.chain_key
+
+        try:
+            from scipy.sparse import coo_matrix
+            from scipy.sparse.csgraph import connected_components
+        except ImportError:  # pragma: no cover - scipy ships with Blender + MN
+            return _components_union_find(self.n_atoms, edges)
+
+        n = self.n_atoms
+        data = np.ones(len(edges), dtype=np.int8)
+        graph = coo_matrix((data, (edges[:, 0], edges[:, 1])), shape=(n, n))
+        _, labels = connected_components(graph, directed=False)
+        return np.asarray(labels)
+
+    def _bond_edges(self) -> np.ndarray:
+        """Bonds as an ``(n, 2)`` array of atom indices, or an empty array."""
+        bonds = getattr(self.array, "bonds", None)
+        if bonds is None:
+            return np.zeros((0, 2), dtype=int)
+        try:
+            table = np.asarray(bonds.as_array(), dtype=int)
+        except Exception:  # pragma: no cover - depends on the biotite version
+            return np.zeros((0, 2), dtype=int)
+        if table.size == 0:
+            return np.zeros((0, 2), dtype=int)
+        edges = table[:, :2]
+        # A bond list written for a larger array — a stack sliced down to one
+        # model, say — would index out of range and crash the graph build.
+        valid = (edges >= 0).all(axis=1) & (edges < self.n_atoms).all(axis=1)
+        return edges[valid]
+
     def neighbours_within(self, mask: np.ndarray, cutoff: float) -> np.ndarray:
         """Return atoms within ``cutoff`` ångström of any atom in ``mask``."""
         if not mask.any() or cutoff <= 0:
@@ -197,6 +253,33 @@ class SelectionContext:
             return mask
         keys = self.chain_key
         return np.isin(keys, np.unique(keys[mask]))
+
+    def expand_to_fragments(self, mask: np.ndarray) -> np.ndarray:
+        """Grow ``mask`` to cover every atom bonded to each touched atom."""
+        if not mask.any():
+            return mask
+        keys = self.fragment_key
+        return np.isin(keys, np.unique(keys[mask]))
+
+
+def _components_union_find(n_atoms: int, edges: np.ndarray) -> np.ndarray:
+    """Connected components without scipy. Only reached if scipy is missing."""
+    parent = np.arange(n_atoms)
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = int(parent[i])
+        return i
+
+    for a, b in edges:
+        root_a, root_b = find(int(a)), find(int(b))
+        if root_a != root_b:
+            parent[root_b] = root_a
+
+    roots = np.array([find(i) for i in range(n_atoms)])
+    _, inverse = np.unique(roots, return_inverse=True)
+    return inverse
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +471,14 @@ class _ByChain(_Node):
 
     def evaluate(self, ctx: SelectionContext) -> np.ndarray:
         return ctx.expand_to_chains(self.operand.evaluate(ctx))
+
+
+@dataclass
+class _ByFragment(_Node):
+    operand: _Node
+
+    def evaluate(self, ctx: SelectionContext) -> np.ndarray:
+        return ctx.expand_to_fragments(self.operand.evaluate(ctx))
 
 
 @dataclass
@@ -608,7 +699,19 @@ PROPERTY_KEYWORDS: dict[str, tuple[str, str]] = {
     "rank": ("__rank__", "int"),
 }
 
-_UNARY_PREFIXES = {"not", "byres", "byresidue", "bychain", "byobject", "first", "last"}
+_UNARY_PREFIXES = {
+    "not",
+    "byres",
+    "byresidue",
+    "bychain",
+    "byobject",
+    "byfrag",
+    "byfragment",
+    "bymol",
+    "bymolecule",
+    "first",
+    "last",
+}
 _POSTFIX_OPERATORS = {"within", "around", "expand", "gap", "near_to", "beyond"}
 
 
@@ -766,6 +869,8 @@ class _Parser:
                     return _ByResidue(operand)
                 if word in ("bychain", "byobject"):
                     return _ByChain(operand)
+                if word in ("byfrag", "byfragment", "bymol", "bymolecule"):
+                    return _ByFragment(operand)
                 return _Edge(operand, last=(word == "last"))
         return self.parse_primary()
 
@@ -1052,3 +1157,215 @@ def select_indices(
         Sorted array of 0-based atom indices.
     """
     return np.flatnonzero(select(target, selection, context))
+
+
+def expand_selection(
+    target: Any,
+    selection: str | Selection | np.ndarray,
+    level: str = "residue",
+    context: SelectionContext | None = None,
+) -> np.ndarray:
+    """Grow a selection to whole residues, chains or bonded fragments.
+
+    This is PyMOL's selection level applied after the fact: pick a few atoms
+    in the viewport, then expand to the residues they belong to. Levels
+    compose, so expanding a residue-level mask to ``"chain"`` grows it again.
+
+    Parameters
+    ----------
+    target : AtomArray, AtomArrayStack, Molecule, or AtomStructure
+        Structure to select from.
+    selection : str, Selection, or numpy.ndarray
+        What to expand. See :func:`select`.
+    level : {"atom", "residue", "chain", "fragment", "object"}, optional
+        ``"atom"`` returns the mask unchanged, ``"fragment"`` grows to the
+        connected component of the bond graph, and ``"object"`` to everything.
+    context : SelectionContext, optional
+        Shared evaluation cache.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask of length ``len(array)``.
+
+    Raises
+    ------
+    ValueError
+        If ``level`` is not one of :data:`LEVELS`.
+    """
+    if level not in LEVELS:
+        raise ValueError(f"unknown selection level {level!r}; expected one of {LEVELS}")
+
+    array = as_atom_array(target)
+    ctx = context if context is not None else SelectionContext(array)
+    mask = select(array, selection, ctx)
+
+    if level == "atom" or not mask.any():
+        return mask
+    if level == "residue":
+        return ctx.expand_to_residues(mask)
+    if level == "chain":
+        return ctx.expand_to_chains(mask)
+    if level == "fragment":
+        return ctx.expand_to_fragments(mask)
+    return np.ones(ctx.n_atoms, dtype=bool)
+
+
+def describe_selection(
+    target: Any,
+    selection: str | Selection | np.ndarray,
+    context: SelectionContext | None = None,
+) -> str:
+    """Render a selection as a PyMOL selection string.
+
+    The inverse of :func:`select`, and the reason a viewport pick can be
+    pasted into any other Gala call or into PyMOL itself. The result is
+    *verified* before it is returned — it is re-evaluated against the
+    structure and only used if it reproduces the mask exactly. Structures
+    where the chemical description is ambiguous (repeated residue numbers
+    under insertion codes, blank chain identifiers) therefore fall back to the
+    positional ``index 3+7-10`` form, which is always exact.
+
+    Parameters
+    ----------
+    target : AtomArray, AtomArrayStack, Molecule, or AtomStructure
+        Structure the selection refers to.
+    selection : str, Selection, or numpy.ndarray
+        Usually a boolean mask. See :func:`select`.
+    context : SelectionContext, optional
+        Shared evaluation cache.
+
+    Returns
+    -------
+    str
+        A selection string that evaluates back to the same atoms.
+
+    Examples
+    --------
+    >>> describe_selection(array, mask)   # doctest: +SKIP
+    'chain A and resi 45-47'
+    """
+    array = as_atom_array(target)
+    ctx = context if context is not None else SelectionContext(array)
+    mask = select(array, selection, ctx)
+
+    if not mask.any():
+        return "none"
+    if mask.all():
+        return "all"
+
+    text = _describe_by_chain(ctx, mask)
+    if text is not None:
+        try:
+            if np.array_equal(select(array, text, ctx), mask):
+                return text
+        except SelectionSyntaxError:
+            # A residue or atom name carrying a character the language uses as
+            # punctuation. Nothing to salvage; the positional form is exact.
+            pass
+    return _describe_by_index(mask)
+
+
+def _describe_by_chain(ctx: SelectionContext, mask: np.ndarray) -> str | None:
+    """Describe a mask chain by chain, or ``None`` if it cannot be."""
+    chains = ctx.upper("chain_id")
+    raw_res_ids = ctx.annotation("res_id")
+    if raw_res_ids is None:
+        return None
+    res_ids = np.asarray(raw_res_ids)
+    names = ctx.upper("atom_name")
+    residue_key = ctx.residue_key
+
+    clauses: list[str] = []
+    complete: list[str] = []
+    for chain in np.unique(chains[mask]):
+        if not chain:
+            return None  # a blank chain id cannot be written as `chain X`
+        in_chain = chains == chain
+        picked = mask & in_chain
+        prefix = f"chain {chain}"
+
+        if np.array_equal(picked, in_chain):
+            complete.append(str(chain))
+            continue
+
+        whole: list[int] = []
+        # Partly selected residues are grouped by *which* atoms of them were
+        # picked, so that a backbone trace comes out as one
+        # `chain A and resi 1-7 and name CA` rather than one clause per
+        # residue. Insertion order keeps the output deterministic.
+        partial: dict[tuple[str, ...], list[int]] = {}
+
+        for key in np.unique(residue_key[picked]):
+            in_residue = residue_key == key
+            if not (in_residue & ~picked).any():
+                whole.append(int(key))
+                continue
+            atom_names = tuple(np.unique(names[in_residue & picked]))
+            if any(not name for name in atom_names):
+                return None  # an unnamed atom cannot be written as `name X`
+            partial.setdefault(atom_names, []).append(int(key))
+
+        if whole:
+            covered = np.isin(residue_key, whole)
+            clauses.append(f"{prefix} and resi {_compact_ints(res_ids[covered])}")
+
+        for atom_names, keys in partial.items():
+            numbers = []
+            for key in keys:
+                residue_number = np.unique(res_ids[residue_key == key])
+                if residue_number.size != 1:  # pragma: no cover - residue_key
+                    return None  # includes res_id, so this cannot happen
+                numbers.append(int(residue_number[0]))
+            clauses.append(
+                f"{prefix} and resi {_compact_ints(np.array(numbers))} "
+                f"and name {'+'.join(atom_names)}"
+            )
+
+    # Chains taken whole collapse into one `chain B+C+D` rather than a clause
+    # each, and lead, because that is the coarsest statement being made.
+    if complete:
+        clauses.insert(0, f"chain {'+'.join(complete)}")
+
+    if not clauses:  # pragma: no cover - an empty mask returns earlier
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+
+    # `and` binds tighter than `or`, so the parentheses are for the reader
+    # rather than the parser.
+    return " or ".join(
+        clause if clause.startswith("(") or " and " not in clause else f"({clause})"
+        for clause in clauses
+    )
+
+
+def _describe_by_index(mask: np.ndarray) -> str:
+    """Describe a mask positionally. Always exact, never enlightening."""
+    return f"index {_compact_ints(np.flatnonzero(mask) + 1)}"
+
+
+def _compact_ints(values: np.ndarray) -> str:
+    """Render integers as a PyMOL value list, collapsing runs into ranges."""
+    unique = np.unique(np.asarray(values, dtype=int))
+    parts: list[str] = []
+    start = previous = int(unique[0])
+    for value in unique[1:]:
+        value = int(value)
+        if value == previous + 1:
+            previous = value
+            continue
+        parts.append(_range_text(start, previous))
+        start = previous = value
+    parts.append(_range_text(start, previous))
+    return "+".join(parts)
+
+
+def _range_text(low: int, high: int) -> str:
+    if low == high:
+        return str(low)
+    if low < 0:
+        # `resi -5--3` is ambiguous with PyMOL's negative residue numbers, so
+        # a run that starts below zero is written out one number at a time.
+        return "+".join(str(value) for value in range(low, high + 1))
+    return f"{low}-{high}"

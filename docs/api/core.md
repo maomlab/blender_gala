@@ -4,6 +4,12 @@
 
 ::: blender_gala.core.selection
 
+::: blender_gala.core.interactive
+
+::: blender_gala.core.viewport
+
+::: blender_gala.core.attributes
+
 ::: blender_gala.core.geometry
 
 ::: blender_gala.core.collections

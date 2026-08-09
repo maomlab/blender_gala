@@ -7,10 +7,13 @@ import pytest
 
 from blender_gala.core.exceptions import SelectionSyntaxError
 from blender_gala.core.selection import (
+    LEVELS,
     MACRO_KEYWORDS,
     PROPERTY_KEYWORDS,
     Selection,
     compile_selection,
+    describe_selection,
+    expand_selection,
     select,
     select_indices,
 )
@@ -334,3 +337,196 @@ def test_selection_on_real_structure(site_array):
     # The ligand ring sits 3.8 A above the PHE ring, so a 4 A shell catches it.
     near = select(site_array, "byres (protein within 4.0 of resn LIG)")
     assert int(near.sum()) > 0
+
+
+# ---------------------------------------------------------------------------
+# Selection levels
+# ---------------------------------------------------------------------------
+
+
+def test_expand_grows_to_whole_residues(array):
+    picked = select(array, "index 2")
+    assert int(picked.sum()) == 1
+    assert int(expand_selection(array, picked, "residue").sum()) == 4
+
+
+def test_expand_grows_to_whole_chains(array):
+    assert int(expand_selection(array, "index 2", "chain").sum()) == 5
+
+
+def test_expand_at_atom_level_changes_nothing(array):
+    picked = select(array, "name CA")
+    assert np.array_equal(expand_selection(array, picked, "atom"), picked)
+
+
+def test_expand_at_object_level_takes_everything(array):
+    assert expand_selection(array, "index 1", "object").all()
+
+
+def test_expand_of_nothing_stays_nothing(array):
+    for level in LEVELS:
+        assert not expand_selection(array, "none", level).any()
+
+
+def test_expand_levels_compose(array):
+    once = expand_selection(array, "index 2", "residue")
+    twice = expand_selection(array, once, "chain")
+    assert int(twice.sum()) == 5
+
+
+def test_expand_rejects_an_unknown_level(array):
+    with pytest.raises(ValueError, match="unknown selection level"):
+        expand_selection(array, "all", "molecule")
+
+
+def test_fragment_falls_back_to_chain_without_bonds(array):
+    # `array` carries no bond list, so the honest answer for "everything
+    # bonded to this" is the chain it belongs to.
+    assert np.array_equal(
+        expand_selection(array, "index 2", "fragment"),
+        expand_selection(array, "index 2", "chain"),
+    )
+
+
+def test_fragment_follows_bonds_when_there_are_any(array):
+    # Two atoms of chain A bonded to each other, and nothing else.
+    array.bonds = _Bonds([[0, 1, 1]])
+    fragment = expand_selection(array, "index 1", "fragment")
+    assert list(np.flatnonzero(fragment)) == [0, 1]
+
+
+class _Bonds:
+    """The part of a biotite ``BondList`` the fragment level uses."""
+
+    def __init__(self, table):
+        self._table = np.asarray(table, dtype=int)
+
+    def as_array(self):
+        return self._table
+
+
+def test_bymol_is_the_fragment_level_in_the_language(array):
+    array.bonds = _Bonds([[0, 1, 1]])
+    assert list(np.flatnonzero(select(array, "bymol index 1"))) == [0, 1]
+
+
+# ---------------------------------------------------------------------------
+# Describing a mask
+# ---------------------------------------------------------------------------
+
+
+def _round_trips(array, selection) -> str:
+    """Assert the description of a selection selects the same atoms again."""
+    mask = select(array, selection)
+    text = describe_selection(array, mask)
+    assert np.array_equal(select(array, text), mask), f"{selection!r} -> {text!r}"
+    return text
+
+
+def test_describe_the_extremes(array):
+    assert describe_selection(array, "all") == "all"
+    assert describe_selection(array, "none") == "none"
+
+
+def test_describe_a_whole_chain(array):
+    assert _round_trips(array, "chain A") == "chain A"
+
+
+@pytest.fixture
+def peptides():
+    """Three chains of five residues, two atoms each — room for real ranges."""
+    chains, res_ids, names = [], [], []
+    for chain in "ABC":
+        for res_id in range(1, 6):
+            chains += [chain, chain]
+            res_ids += [res_id, res_id]
+            names += ["CA", "CB"]
+    n = len(chains)
+    return Fake(
+        chain_id=chains,
+        res_id=res_ids,
+        res_name=["GLY"] * n,
+        atom_name=names,
+        element=["C"] * n,
+        b_factor=[1.0] * n,
+        occupancy=[1.0] * n,
+        hetero=[False] * n,
+        coord=[[0, 0, 0]] * n,
+    )
+
+
+def test_describe_several_whole_chains_as_one_clause(peptides):
+    assert _round_trips(peptides, "chain B or chain C") == "chain B+C"
+
+
+def test_describe_whole_residues_as_a_range(peptides):
+    assert _round_trips(peptides, "chain A and resi 2-4") == "chain A and resi 2-4"
+
+
+def test_describe_groups_partial_residues_by_atom_name(peptides):
+    # One clause for the lot, not one clause per residue.
+    assert (
+        _round_trips(peptides, "chain A and name CA")
+        == "chain A and resi 1-5 and name CA"
+    )
+
+
+def test_describe_keeps_whole_and_partial_residues_apart(peptides):
+    text = _round_trips(peptides, "(chain A and resi 1) or (chain A and name CA)")
+    assert text == "(chain A and resi 1) or (chain A and resi 2-5 and name CA)"
+
+
+def test_describe_spans_chains(array):
+    text = _round_trips(array, "chain A and resi 1 or chain B and resi 999")
+    assert " or " in text
+
+
+def test_describe_is_verified_and_falls_back_to_index(array):
+    # Blank chain identifiers cannot be written as `chain X`, so the
+    # positional form is used instead — and it is still exact.
+    blank = Fake(
+        chain_id=["", ""],
+        res_id=[1, 1],
+        res_name=["ALA", "ALA"],
+        atom_name=["N", "CA"],
+        element=["N", "C"],
+        b_factor=[1.0, 1.0],
+        occupancy=[1.0, 1.0],
+        hetero=[False, False],
+        coord=[[0, 0, 0], [1, 0, 0]],
+    )
+    assert describe_selection(blank, np.array([True, False])) == "index 1"
+
+
+def test_describe_compacts_runs_but_not_negative_ones():
+    array = Fake(
+        chain_id=["A"] * 5,
+        res_id=[-2, -1, 3, 4, 5],
+        res_name=["GLY"] * 5,
+        atom_name=["CA"] * 5,
+        element=["C"] * 5,
+        b_factor=[1.0] * 5,
+        occupancy=[1.0] * 5,
+        hetero=[False] * 5,
+        coord=[[0, 0, 0]] * 5,
+    )
+    text = describe_selection(array, "resi 3-5")
+    assert text == "chain A and resi 3-5"
+    # A run that starts below zero is ambiguous with PyMOL's negative residue
+    # numbering, so it is written out rather than collapsed.
+    assert describe_selection(array, "resi -2+-1") == "chain A and resi -2+-1"
+
+
+def test_describe_round_trips_on_a_real_structure(site_array):
+    for selection in (
+        "all",
+        "protein",
+        "chain B",
+        "name CA",
+        "backbone",
+        "sidechain",
+        "byres (protein within 4.0 of resn LIG)",
+        "b > 0",
+        "index 1+5+9-12",
+    ):
+        _round_trips(site_array, selection)

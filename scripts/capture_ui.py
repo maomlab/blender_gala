@@ -69,6 +69,10 @@ class Shot:
         Draw the rest of the panels too, collapsed. Off for the close-ups, so
         each one is about its own panel — and because Scene Setup with its
         sub-panels open is already taller than the window.
+    molecule : bool
+        Load a structure through Molecular Nodes and store two named
+        selections first. Only the selection shots need it; the rest say
+        everything they have to say with an empty scene.
     """
 
     name: str
@@ -76,6 +80,7 @@ class Shot:
     props: dict[str, object] = field(default_factory=dict)
     tabs: bool = False
     others: bool = False
+    molecule: bool = False
 
 
 SCENE_PANELS = (
@@ -90,6 +95,20 @@ SHOTS = (
     # of the add-on is visible in one picture.
     Shot("sidebar", expand=("GALA_PT_scene",), tabs=True, others=True),
     Shot("scene-setup", expand=SCENE_PANELS),
+    Shot(
+        "selection",
+        expand=("GALA_PT_selection",),
+        # The readout is the half of this panel a screenshot can show; the
+        # other half is picking atoms in Edit Mode.
+        props={"selection_text": "chain A and resi 45-47"},
+    ),
+    Shot(
+        "selection-stored",
+        # A sub-panel, so its parent has to be drawn for it to exist at all.
+        expand=("GALA_PT_selection", "GALA_PT_named_selections"),
+        props={"selection_text": "byres (protein within 4.5 of resn LIG)"},
+        molecule=True,
+    ),
     Shot("interactions", expand=("GALA_PT_interactions",)),
     Shot(
         "measure",
@@ -145,6 +164,10 @@ def capture(shot: Shot, raw_path: str, meta_path: str) -> None:
     from blender_gala.ui import panels
 
     for panel in panels.classes:
+        # `classes` is the registration list, so it also carries the UIList the
+        # selection panel draws. That has no bl_idname and nothing to expand.
+        if not issubclass(panel, bpy.types.Panel):
+            continue
         if panel.bl_idname in shot.expand:
             panel.bl_options = set()
         elif shot.others:
@@ -160,6 +183,9 @@ def capture(shot: Shot, raw_path: str, meta_path: str) -> None:
     # the viewport through it. Off, the background is flat and croppable.
     preferences = bpy.context.preferences
     preferences.system.use_region_overlap = False
+
+    if shot.molecule:
+        _load_sample()
 
     for key, value in shot.props.items():
         setattr(bpy.context.scene.gala, key, value)
@@ -207,6 +233,42 @@ def capture(shot: Shot, raw_path: str, meta_path: str) -> None:
         return 0.3 if steps else None
 
     bpy.app.timers.register(advance, first_interval=1.0)
+
+
+def _load_sample() -> None:
+    """Load the test structure and store two selections on it.
+
+    The stored-selections list draws over the active object's attributes, so
+    without a molecule carrying some it would photograph as an empty box —
+    true, but not what the panel is for.
+    """
+    import bpy
+
+    import blender_gala as gala
+    from blender_gala.core import mn as mn_bridge
+
+    module = mn_bridge.get_mn()
+    if module is None:
+        print("  Molecular Nodes unavailable; the selection list will be empty")
+        return
+
+    # The factory scene's cube would otherwise stay active and the list would
+    # draw over its attributes instead.
+    for obj in list(bpy.data.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+
+    molecule = module.Molecule.load(
+        os.path.join(REPO_ROOT, "tests", "data", "site.pdb")
+    )
+    bpy.context.view_layer.objects.active = molecule.object
+
+    gala.create_alias(molecule, "pocket", "byres (protein within 4.5 of resn LIG)")
+    gala.create_alias(molecule, "ligand", "resn LIG")
+    molecule.object.gala_selection_index = next(
+        index
+        for index, attribute in enumerate(molecule.object.data.attributes)
+        if attribute.name == "pocket"
+    )
 
 
 def _redraw() -> None:

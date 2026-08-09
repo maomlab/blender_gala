@@ -19,7 +19,9 @@ from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 from ..annotate import labels as gala_labels
 from ..color import coloring
+from ..core import attributes as gala_attributes
 from ..core import collections as gala_collections
+from ..core import interactive as gala_interactive
 from ..core import mn as mn_bridge
 from ..core.entity import AtomStructure
 from ..core.exceptions import GalaError
@@ -32,7 +34,33 @@ from ..measure import draw as measure_draw
 from ..measure import measurements
 from ..scene import compositing, lighting, materials, origin, render, setup
 
-__all__ = ["active_structure", "classes", "selected_atom_indices"]
+__all__ = [
+    "STYLE_ITEMS",
+    "active_alias",
+    "active_structure",
+    "classes",
+    "selected_atom_indices",
+]
+
+#: The Molecular Nodes styles worth offering for a named selection. Molecular
+#: Nodes accepts more names than these, but the rest are aliases of the same
+#: node (``vdw`` for ``spheres``) or are for density maps rather than atoms.
+STYLE_ITEMS = (
+    ("ball_and_stick", "Ball and Stick", "Spheres joined by bonds"),
+    ("spheres", "Spheres", "Space-filling"),
+    ("sticks", "Sticks", "Bonds only"),
+    ("cartoon", "Cartoon", "Secondary-structure ribbon"),
+    ("ribbon", "Ribbon", "Backbone trace"),
+    ("surface", "Surface", "Molecular surface"),
+)
+
+#: Selection levels, as an operator and panel enum.
+LEVEL_ITEMS = (
+    ("atom", "Atom", "Just the atoms picked"),
+    ("residue", "Residue", "Every atom of each residue touched"),
+    ("chain", "Chain", "Every atom of each chain touched"),
+    ("fragment", "Fragment", "Everything bonded to what was picked"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +128,31 @@ def selected_atom_indices(context: Any) -> list[int]:
     flags = np.empty(len(vertices), dtype=bool)
     vertices.foreach_get("select", flags)
     return [int(i) for i in np.flatnonzero(flags)]
+
+
+def active_alias(structure: AtomStructure | None) -> str | None:
+    """The named selection highlighted in the panel's list, if any.
+
+    The list is drawn over ``mesh.attributes`` — the attributes *are* the
+    selections, so there is no second copy of the names to keep in step — and
+    the active index is an index into that. An index that has drifted onto
+    something which is not one of Gala's selections falls back to the first
+    one, which is friendlier than doing nothing.
+    """
+    obj = getattr(structure, "object", None)
+    if obj is None:
+        return None
+    names = gala_attributes.registered(obj)
+    if not names:
+        return None
+
+    mesh_attributes = getattr(getattr(obj, "data", None), "attributes", None)
+    index = getattr(obj, "gala_selection_index", 0)
+    if mesh_attributes is not None and 0 <= index < len(mesh_attributes):
+        candidate = mesh_attributes[index].name
+        if candidate in names:
+            return str(candidate)
+    return names[0]
 
 
 def _report_error(operator: Operator, exc: Exception) -> set[str]:
@@ -300,6 +353,289 @@ class GALA_OT_setup_compositor(_GalaOperator):
             compositing.depth_of_field(
                 structure, fstop=props.dof_fstop, scene=context.scene
             )
+        return {"FINISHED"}
+
+
+# ---------------------------------------------------------------------------
+# Objective 2: interactive selection
+# ---------------------------------------------------------------------------
+
+
+def _selection_summary(structure: AtomStructure, mask: np.ndarray) -> str:
+    """ "142 atoms in 8 residues", the way PyMOL counts what you picked."""
+    atoms = int(mask.sum())
+    if not atoms:
+        return "nothing selected"
+    keys = structure.context.residue_key
+    residues = len(np.unique(keys[mask]))
+    return (
+        f"{atoms} atom{'s' * (atoms != 1)} in {residues} residue{'s' * (residues != 1)}"
+    )
+
+
+class GALA_OT_expand_selection(_GalaOperator):
+    """Grow the selected atoms to whole residues, chains or bonded fragments
+
+    Select atoms in Edit Mode however you like — click, box, circle or
+    lasso — then expand. Expanding again grows the result further, so
+    residue then chain works the way PyMOL's selection levels do.
+    """
+
+    bl_idname = "gala.expand_selection"
+    bl_label = "Expand Selection"
+
+    level: EnumProperty(name="Level", items=LEVEL_ITEMS, default="residue")
+
+    def run(self, context, structure):
+        before = structure.viewport_selection()
+        if not before.any():
+            self.report(
+                {"ERROR"},
+                "Nothing selected. Enter Edit Mode and select some atoms first.",
+            )
+            return {"CANCELLED"}
+
+        after = gala_interactive.expand_viewport_selection(structure, self.level)
+        self.report(
+            {"INFO"},
+            f"{self.level.title()}: {int(before.sum())} -> "
+            f"{_selection_summary(structure, after)}.",
+        )
+        return {"FINISHED"}
+
+
+class GALA_OT_selection_to_text(_GalaOperator):
+    """Write the selected atoms into the box below as a PyMOL selection"""
+
+    bl_idname = "gala.selection_to_text"
+    bl_label = "From Selection"
+
+    def run(self, context, structure):
+        mask = structure.viewport_selection()
+        text = structure.describe(mask)
+        context.scene.gala.selection_text = text
+        if not mask.any():
+            self.report({"WARNING"}, "Nothing is selected.")
+            return {"FINISHED"}
+        self.report({"INFO"}, f"{_selection_summary(structure, mask)}: {text}")
+        return {"FINISHED"}
+
+
+class GALA_OT_copy_selection_text(_GalaOperator):
+    """Copy the selection string to the clipboard"""
+
+    bl_idname = "gala.copy_selection_text"
+    bl_label = "Copy"
+    requires_structure = False
+
+    def run(self, context, structure):
+        text = context.scene.gala.selection_text.strip()
+        if not text:
+            self.report({"WARNING"}, "Nothing to copy.")
+            return {"CANCELLED"}
+        context.window_manager.clipboard = text
+        self.report({"INFO"}, f"Copied {text!r}.")
+        return {"FINISHED"}
+
+
+class GALA_OT_text_to_selection(_GalaOperator):
+    """Select the atoms the selection string matches
+
+    The quickest way to see what a selection actually covers before using it
+    in a figure.
+    """
+
+    bl_idname = "gala.text_to_selection"
+    bl_label = "Select"
+
+    def run(self, context, structure):
+        text = context.scene.gala.selection_text.strip()
+        if not text:
+            self.report({"ERROR"}, "Type a selection first.")
+            return {"CANCELLED"}
+
+        mask = structure.set_viewport_selection(text)
+        if structure.object.mode != "EDIT":
+            self.report(
+                {"INFO"},
+                f"{_selection_summary(structure, mask)}. Enter Edit Mode to see it.",
+            )
+        else:
+            self.report({"INFO"}, _selection_summary(structure, mask))
+        return {"FINISHED"}
+
+
+class GALA_OT_create_alias(_GalaOperator):
+    """Store the selection under a name, so it can be styled and exported
+
+    The name becomes a boolean attribute on the mesh, which is what
+    Molecular Nodes reads when a style is limited to a selection and what a
+    saved PyMOL session carries as a named selection.
+    """
+
+    bl_idname = "gala.create_alias"
+    bl_label = "Store Selection"
+
+    source: EnumProperty(
+        name="From",
+        items=(
+            ("viewport", "Selected Atoms", "Whatever is selected in the viewport"),
+            ("text", "Selection String", "The selection typed in the panel"),
+        ),
+        default="viewport",
+    )
+
+    def run(self, context, structure):
+        props = context.scene.gala
+        name = props.alias_name.strip()
+        if not name:
+            self.report({"ERROR"}, "Give the selection a name first.")
+            return {"CANCELLED"}
+
+        selection: Any = None
+        if self.source == "text":
+            selection = props.selection_text.strip()
+            if not selection:
+                self.report({"ERROR"}, "The selection string is empty.")
+                return {"CANCELLED"}
+
+        stored = gala_interactive.create_alias(structure, name, selection)
+        mask = structure.alias(stored)
+
+        # Point the list at what was just made, and offer the next name rather
+        # than leaving the last one to be overwritten by accident.
+        names = gala_attributes.registered(structure.object)
+        mesh_attributes = structure.object.data.attributes
+        for index, attribute in enumerate(mesh_attributes):
+            if attribute.name == stored:
+                structure.object.gala_selection_index = index
+                break
+        props.alias_name = _next_alias_name(names)
+
+        self.report(
+            {"INFO"}, f"Stored {stored!r}: {_selection_summary(structure, mask)}."
+        )
+        return {"FINISHED"}
+
+
+def _next_alias_name(existing: list[str]) -> str:
+    """``sele``, then ``sele_1`` … — PyMOL's habit of never reusing a name."""
+    if "sele" not in existing:
+        return "sele"
+    index = 1
+    while f"sele_{index}" in existing:
+        index += 1
+    return f"sele_{index}"
+
+
+class _AliasOperator(_GalaOperator):
+    """Base for the operators that act on one stored selection.
+
+    The property is ``alias`` rather than ``name`` because ``Operator.name``
+    is already Blender's own read-only label for the operator.
+    """
+
+    alias: StringProperty(
+        name="Name",
+        description="The stored selection to act on. Empty means the active one",
+        default="",
+    )
+
+    def resolve(self, structure: AtomStructure) -> str | None:
+        return self.alias.strip() or active_alias(structure)
+
+
+class GALA_OT_select_alias(_AliasOperator):
+    """Select the atoms of the stored selection"""
+
+    bl_idname = "gala.select_alias"
+    bl_label = "Select"
+
+    def run(self, context, structure):
+        name = self.resolve(structure)
+        if name is None:
+            self.report({"ERROR"}, "There are no stored selections.")
+            return {"CANCELLED"}
+        mask = gala_interactive.select_alias(structure, name)
+        self.report({"INFO"}, f"{name}: {_selection_summary(structure, mask)}.")
+        return {"FINISHED"}
+
+
+class GALA_OT_alias_boolean(_AliasOperator):
+    """Combine the stored selection with what is selected in the viewport"""
+
+    bl_idname = "gala.alias_boolean"
+    bl_label = "Combine Selection"
+
+    mode: EnumProperty(
+        name="Mode",
+        items=(
+            ("union", "Add", "Add the selected atoms to the stored selection"),
+            ("intersect", "Intersect", "Keep only atoms in both"),
+            ("subtract", "Subtract", "Remove the selected atoms from it"),
+        ),
+        default="union",
+    )
+
+    def run(self, context, structure):
+        name = self.resolve(structure)
+        if name is None:
+            self.report({"ERROR"}, "There are no stored selections.")
+            return {"CANCELLED"}
+        combined = gala_interactive.alias_combine(structure, name, mode=self.mode)
+        self.report({"INFO"}, f"{name}: {_selection_summary(structure, combined)}.")
+        return {"FINISHED"}
+
+
+class GALA_OT_delete_alias(_AliasOperator):
+    """Forget the stored selection
+
+    Any style limited to it keeps pointing at the name and will show nothing,
+    so remove the style too if you no longer want it.
+    """
+
+    bl_idname = "gala.delete_alias"
+    bl_label = "Delete Selection"
+
+    def run(self, context, structure):
+        name = self.resolve(structure)
+        if name is None:
+            self.report({"ERROR"}, "There are no stored selections.")
+            return {"CANCELLED"}
+        gala_interactive.delete_alias(structure, name)
+        structure.object.gala_selection_index = 0
+        self.report({"INFO"}, f"Removed {name!r}.")
+        return {"FINISHED"}
+
+
+class GALA_OT_style_alias(_AliasOperator):
+    """Add a Molecular Nodes style covering only the stored selection
+
+    The existing styles are left alone: this adds a branch to the node tree
+    limited to the selection, which is how a pocket gets sticks while the rest
+    of the protein stays a cartoon.
+    """
+
+    bl_idname = "gala.style_alias"
+    bl_label = "Apply Style"
+
+    def run(self, context, structure):
+        name = self.resolve(structure)
+        if name is None:
+            self.report({"ERROR"}, "There are no stored selections.")
+            return {"CANCELLED"}
+
+        props = context.scene.gala
+        gala_interactive.style_alias(
+            structure,
+            name,
+            style=props.alias_style,
+            color=props.alias_color if props.alias_color != "none" else None,
+        )
+        self.report(
+            {"INFO"},
+            f"Added a {props.alias_style.replace('_', ' ')} style on {name!r}.",
+        )
         return {"FINISHED"}
 
 
@@ -742,6 +1078,15 @@ classes = (
     GALA_OT_assign_materials,
     GALA_OT_set_origin,
     GALA_OT_setup_compositor,
+    GALA_OT_expand_selection,
+    GALA_OT_selection_to_text,
+    GALA_OT_copy_selection_text,
+    GALA_OT_text_to_selection,
+    GALA_OT_create_alias,
+    GALA_OT_select_alias,
+    GALA_OT_alias_boolean,
+    GALA_OT_delete_alias,
+    GALA_OT_style_alias,
     GALA_OT_find_interactions,
     GALA_OT_clear_interactions,
     GALA_OT_measure,

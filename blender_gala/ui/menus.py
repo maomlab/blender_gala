@@ -39,10 +39,31 @@ def draw_export(self: Any, context: Any) -> None:
     self.layout.operator("gala.save_pymol_session", text=_LABEL, icon="EXPORT")
 
 
+#: The levels offered in the Edit Mode Select menu, and what each is called
+#: there. The sidebar has the same four behind an enum; this is for the person
+#: who has just box-selected some atoms and has the Select menu open.
+_LEVELS = (
+    ("residue", "Expand to Residue"),
+    ("chain", "Expand to Chain"),
+    ("fragment", "Expand to Fragment"),
+)
+
+
+def draw_select(self: Any, context: Any) -> None:
+    """Draw the expand entries. Appended to ``VIEW3D_MT_select_edit_mesh``."""
+    layout = self.layout
+    layout.separator()
+    for level, label in _LEVELS:
+        layout.operator(
+            "gala.expand_selection", text=label, icon="SELECT_EXTEND"
+        ).level = level
+
+
 #: The menus to extend, and the function each takes.
 _ENTRIES = (
     ("TOPBAR_MT_file_import", draw_import),
     ("TOPBAR_MT_file_export", draw_export),
+    ("VIEW3D_MT_select_edit_mesh", draw_select),
 )
 
 

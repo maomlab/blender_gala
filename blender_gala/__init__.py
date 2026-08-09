@@ -98,9 +98,21 @@ from .core import (
     Selection,
     SelectionSyntaxError,
     StructureError,
+    alias_combine,
     compile_selection,
+    create_alias,
+    delete_alias,
+    describe_selection,
+    describe_viewport_selection,
+    expand_selection,
+    expand_viewport_selection,
+    list_aliases,
     select,
+    select_alias,
     select_indices,
+    set_viewport_selection,
+    style_alias,
+    viewport_selection,
 )
 from .electrostatics import (
     PotentialGrid,
@@ -194,6 +206,7 @@ __all__ = [
     "SelectionSyntaxError",
     "StructureError",
     "__version__",
+    "alias_combine",
     "angle",
     "annotate",
     "assign_material",
@@ -212,8 +225,12 @@ __all__ = [
     "color_from_csv",
     "compile_selection",
     "core",
+    "create_alias",
+    "delete_alias",
     "depth_cue",
     "depth_of_field",
+    "describe_selection",
+    "describe_viewport_selection",
     "dihedral",
     "distance",
     "draw_interactions",
@@ -221,6 +238,8 @@ __all__ = [
     "electrostatics",
     "enable_caustics",
     "enable_passes",
+    "expand_selection",
+    "expand_viewport_selection",
     "find_interactions",
     "frame_target",
     "halogen_bonds",
@@ -233,6 +252,7 @@ __all__ = [
     "label_atoms",
     "label_hud",
     "label_residues",
+    "list_aliases",
     "load_session",
     "measure",
     "measure_atoms",
@@ -254,12 +274,16 @@ __all__ = [
     "save_session",
     "scene",
     "select",
+    "select_alias",
     "select_indices",
     "set_origin_to_geometry",
+    "set_viewport_selection",
     "setup_compositor",
     "setup_render",
+    "style_alias",
     "three_point_lighting",
     "unregister",
+    "viewport_selection",
     "write_colors",
     "write_session",
 ]
@@ -277,14 +301,18 @@ def register() -> None:
     a script.
     """
     from . import ops, ui
+    from .core import mn_compat
 
     ops.register()
     ui.register()
+    mn_compat.install()
 
 
 def unregister() -> None:
     """Unregister the add-on."""
     from . import ops, ui
+    from .core import mn_compat
 
+    mn_compat.remove()
     ui.unregister()
     ops.unregister()

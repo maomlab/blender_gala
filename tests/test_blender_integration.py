@@ -716,9 +716,16 @@ def test_measure_operator_rejects_a_bad_atom_count(registered, site_molecule):
 
 
 def test_panels_declare_the_gala_category(registered):
+    """Every panel lands in the Gala tab. `classes` also carries the UIList
+    the selection panel draws, which has no tab of its own."""
+    import bpy
+
     from blender_gala.ui import panels
 
-    for panel in panels.classes:
+    drawn = [cls for cls in panels.classes if issubclass(cls, bpy.types.Panel)]
+    assert len(drawn) == len(panels.classes) - 1
+
+    for panel in drawn:
         assert panel.bl_category == "Gala"
         assert panel.bl_space_type == "VIEW_3D"
 
@@ -981,3 +988,324 @@ def test_an_automatic_label_is_smaller_in_a_close_up(site_molecule):
     close = label_size(0.5)
     far = label_size(5.0)
     assert close < far
+
+
+# ---------------------------------------------------------------------------
+# Interactive selection
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def edit_mode(obj):
+    """Put ``obj`` into Edit Mode for the duration of the block."""
+    import bpy
+
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode="EDIT")
+    try:
+        yield obj
+    finally:
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+
+@requires_mn
+def test_viewport_selection_round_trips_in_object_mode(clean_scene, site_molecule):
+    import blender_gala as gala
+
+    applied = gala.set_viewport_selection(site_molecule, "resn LIG")
+    assert np.array_equal(gala.viewport_selection(site_molecule), applied)
+    assert int(applied.sum()) == 9
+
+
+@requires_mn
+def test_viewport_selection_survives_entering_edit_mode(clean_scene, site_molecule):
+    """Blender flushes edge selection down onto vertices when Edit Mode opens,
+    so a vertex-only write would be undone by pressing Tab."""
+    import blender_gala as gala
+
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+    with edit_mode(site_molecule.object):
+        assert int(gala.viewport_selection(site_molecule).sum()) == 9
+
+
+@requires_mn
+def test_viewport_selection_is_read_from_bmesh_in_edit_mode(clean_scene, site_molecule):
+    import bmesh
+
+    import blender_gala as gala
+
+    with edit_mode(site_molecule.object) as obj:
+        mesh = bmesh.from_edit_mesh(obj.data)
+        for vertex in mesh.verts:
+            vertex.select = vertex.index < 3
+        bmesh.update_edit_mesh(obj.data)
+        assert list(np.flatnonzero(gala.viewport_selection(site_molecule))) == [0, 1, 2]
+
+
+@requires_mn
+def test_describe_viewport_selection(clean_scene, site_molecule):
+    import blender_gala as gala
+
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+    text = gala.describe_viewport_selection(site_molecule)
+    assert int(gala.select(site_molecule, text).sum()) == 9
+
+
+@requires_mn
+def test_expand_viewport_selection_grows_and_applies(clean_scene, site_molecule):
+    import blender_gala as gala
+
+    gala.set_viewport_selection(site_molecule, "resi 2 and name CA")
+    expanded = gala.expand_viewport_selection(site_molecule, "residue")
+    assert int(expanded.sum()) > 1
+    # The expansion is applied, not just returned.
+    assert np.array_equal(gala.viewport_selection(site_molecule), expanded)
+
+
+@requires_mn
+def test_expand_viewport_selection_at_fragment_level(clean_scene, site_molecule):
+    """Molecular Nodes brings bonds in, so a fragment is a real connected
+    component of the bond graph rather than the chain fallback."""
+    import blender_gala as gala
+    from blender_gala.core.entity import AtomStructure
+
+    structure = AtomStructure.from_any(site_molecule)
+    fragments = structure.context.fragment_key
+    chains = structure.context.chain_key
+    assert len(np.unique(fragments)) > len(np.unique(chains)), "bonds were not used"
+
+    gala.set_viewport_selection(site_molecule, "resi 2 and name CA")
+    fragment = gala.expand_viewport_selection(site_molecule, "fragment")
+    assert int(fragment.sum()) == int(gala.select(site_molecule, "chain A").sum())
+
+
+@requires_mn
+def test_an_unbonded_atom_is_its_own_fragment(clean_scene, site_molecule):
+    """The fixture's ligand is synthetic, so Molecular Nodes infers no bonds
+    for it. Growing along a bond graph that has no bonds is a no-op, which is
+    what Blender's own Select Linked does too."""
+    import blender_gala as gala
+
+    gala.set_viewport_selection(site_molecule, "resn LIG and elem CL")
+    assert int(gala.expand_viewport_selection(site_molecule, "fragment").sum()) == 1
+    # The residue level still covers the whole ligand.
+    gala.set_viewport_selection(site_molecule, "resn LIG and elem CL")
+    assert int(gala.expand_viewport_selection(site_molecule, "residue").sum()) == 9
+
+
+@requires_mn
+def test_aliases_are_stored_as_boolean_attributes(clean_scene, site_molecule):
+    import blender_gala as gala
+
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+    name = gala.create_alias(site_molecule, "pocket")
+
+    assert name == "pocket"
+    attribute = site_molecule.object.data.attributes["pocket"]
+    assert attribute.data_type == "BOOLEAN"
+    assert attribute.domain == "POINT"
+    assert int(gala.list_aliases(site_molecule)["pocket"].sum()) == 9
+
+
+@requires_mn
+def test_alias_names_are_made_safe(clean_scene, site_molecule):
+    import blender_gala as gala
+
+    name = gala.create_alias(site_molecule, "binding site!", "resn LIG")
+    assert name == "binding_site"
+    assert "binding_site" in gala.list_aliases(site_molecule)
+
+
+@requires_mn
+def test_an_empty_alias_is_refused(clean_scene, site_molecule):
+    import blender_gala as gala
+
+    with pytest.raises(ValueError, match="the selection is empty"):
+        gala.create_alias(site_molecule, "nothing", "none")
+
+
+@requires_mn
+def test_aliases_can_be_created_in_edit_mode(clean_scene, site_molecule):
+    """The values live in the BMesh until the mode is toggled, so this would
+    otherwise write into a mesh nobody is reading."""
+    import blender_gala as gala
+
+    gala.set_viewport_selection(site_molecule, "resn LIG")
+    with edit_mode(site_molecule.object):
+        gala.create_alias(site_molecule, "pocket")
+        assert int(gala.list_aliases(site_molecule)["pocket"].sum()) == 9
+    assert int(gala.list_aliases(site_molecule)["pocket"].sum()) == 9
+
+
+@requires_mn
+def test_molecular_nodes_booleans_are_not_mistaken_for_aliases(
+    clean_scene, site_molecule
+):
+    import blender_gala as gala
+    from blender_gala.core import attributes
+
+    gala.create_alias(site_molecule, "pocket", "resn LIG")
+    obj = site_molecule.object
+
+    # Molecular Nodes stores several booleans of its own on the same mesh.
+    assert len(attributes.list_booleans(obj)) > 1
+    assert attributes.registered(obj) == ["pocket"]
+
+
+@requires_mn
+def test_a_deleted_attribute_drops_out_of_the_registry(clean_scene, site_molecule):
+    import blender_gala as gala
+    from blender_gala.core import attributes
+
+    gala.create_alias(site_molecule, "pocket", "resn LIG")
+    obj = site_molecule.object
+    obj.data.attributes.remove(obj.data.attributes["pocket"])
+    assert attributes.registered(obj) == []
+
+
+@requires_mn
+def test_select_and_combine_an_alias(clean_scene, site_molecule):
+    import blender_gala as gala
+
+    gala.create_alias(site_molecule, "pocket", "resn LIG")
+
+    assert int(gala.select_alias(site_molecule, "pocket").sum()) == 9
+
+    gala.set_viewport_selection(site_molecule, "chain A")
+    grown = gala.alias_combine(site_molecule, "pocket", mode="union")
+    assert int(grown.sum()) == 9 + int(gala.select(site_molecule, "chain A").sum())
+
+    shrunk = gala.alias_combine(site_molecule, "pocket", mode="subtract")
+    assert int(shrunk.sum()) == 9
+
+
+@requires_mn
+def test_delete_alias(clean_scene, site_molecule):
+    import blender_gala as gala
+
+    gala.create_alias(site_molecule, "pocket", "resn LIG")
+    assert gala.delete_alias(site_molecule, "pocket") is True
+    assert gala.list_aliases(site_molecule) == {}
+    assert gala.delete_alias(site_molecule, "pocket") is False
+
+
+@requires_mn
+def test_style_alias_limits_a_style_to_the_named_attribute(clean_scene, site_molecule):
+    """Molecular Nodes wires a Named Attribute node into the style's Selection
+    socket, which is the whole reason an alias is worth storing."""
+    import blender_gala as gala
+
+    site_molecule.add_style("cartoon")
+    gala.create_alias(site_molecule, "pocket", "resn LIG")
+    gala.style_alias(site_molecule, "pocket", style="ball_and_stick")
+
+    limited = []
+    for node in site_molecule.tree.nodes:
+        socket = node.inputs.get("Selection") if node.name.startswith("Style") else None
+        if socket is not None and socket.links:
+            source = socket.links[0].from_socket.node
+            limited.append((node.name, source.inputs[0].default_value))
+
+    assert limited == [("Style Ball and Stick", "pocket")]
+
+
+@requires_mn
+def test_style_alias_needs_an_alias_that_exists(clean_scene, site_molecule):
+    import blender_gala as gala
+    from blender_gala.core.exceptions import StructureError
+
+    with pytest.raises(StructureError, match="no selection named 'ghost'"):
+        gala.style_alias(site_molecule, "ghost")
+
+
+@requires_mn
+def test_selection_operators_run_end_to_end(registered, site_molecule):
+    import bpy
+
+    import blender_gala as gala
+
+    bpy.context.view_layer.objects.active = site_molecule.object
+    props = bpy.context.scene.gala
+
+    props.selection_text = "resn LIG"
+    assert bpy.ops.gala.text_to_selection() == {"FINISHED"}
+    assert int(gala.viewport_selection(site_molecule).sum()) == 9
+
+    assert bpy.ops.gala.expand_selection(level="chain") == {"FINISHED"}
+    assert int(gala.viewport_selection(site_molecule).sum()) == 9
+
+    assert bpy.ops.gala.selection_to_text() == {"FINISHED"}
+    assert props.selection_text
+    assert bpy.ops.gala.copy_selection_text() == {"FINISHED"}
+
+    props.alias_name = "pocket"
+    assert bpy.ops.gala.create_alias(source="viewport") == {"FINISHED"}
+    assert "pocket" in gala.list_aliases(site_molecule)
+    # The name box moves on rather than inviting an accidental overwrite.
+    assert props.alias_name != "pocket"
+
+    assert bpy.ops.gala.select_alias(alias="pocket") == {"FINISHED"}
+    assert bpy.ops.gala.style_alias(alias="pocket") == {"FINISHED"}
+    assert bpy.ops.gala.delete_alias(alias="pocket") == {"FINISHED"}
+    assert gala.list_aliases(site_molecule) == {}
+
+
+@requires_mn
+def test_expanding_nothing_is_an_error_not_a_no_op(registered, site_molecule):
+    import bpy
+
+    import blender_gala as gala
+
+    bpy.context.view_layer.objects.active = site_molecule.object
+    gala.set_viewport_selection(site_molecule, "none")
+
+    with pytest.raises(RuntimeError, match="Nothing selected"):
+        bpy.ops.gala.expand_selection(level="residue")
+
+
+def test_the_molecular_nodes_panel_guard_is_reversible(registered):
+    """Gala wraps one Molecular Nodes panel function; unregistering puts it
+    back, and installing without Molecular Nodes does nothing."""
+    from blender_gala.core import mn_compat
+
+    panel = mn_compat._panel_module()
+    if panel is None:
+        assert mn_compat.install() is False
+        return
+
+    # Registering installed it, so what is there now is Gala's wrapper.
+    wrapper = panel.panel_selection_node
+    mn_compat.remove()
+
+    restored = panel.panel_selection_node
+    assert restored is not wrapper
+    assert restored.__module__.endswith("molecularnodes.ui.panel")
+
+    assert mn_compat.install() is True
+    assert panel.panel_selection_node is not restored
+
+
+def test_every_icon_named_in_the_ui_exists(registered):
+    """A misspelt icon raises only when the panel is first drawn, which is
+    after the add-on has shipped."""
+    import pathlib
+    import re
+
+    import bpy
+
+    import blender_gala
+
+    known = set(
+        bpy.types.UILayout.bl_rna.functions["operator"]
+        .parameters["icon"]
+        .enum_items.keys()
+    )
+    ui = pathlib.Path(blender_gala.__file__).parent / "ui"
+
+    unknown = {
+        (path.name, icon)
+        for path in ui.glob("*.py")
+        for icon in re.findall(r'icon="([A-Z0-9_]+)"', path.read_text())
+        if icon not in known
+    }
+    assert unknown == set()

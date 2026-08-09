@@ -125,7 +125,7 @@ primary   := "(" selection ")" | keyword_sel | macro | identifier_macro
 | --- | --- |
 | Property | `chain`, `resi`/`resid`/`residue`, `resn`/`resname`, `name`, `elem`/`element`, `index`, `id`, `b`, `q`, `segi`, `alt`, `ss` |
 | Macro | `all`, `none`, `protein`/`polymer`, `nucleic`, `backbone`, `sidechain`, `water`/`solvent`, `hetatm`/`hetero`, `ligand`, `ions`, `metals`, `hydro`, `donors`, `acceptors`, `polar`, `carbon` |
-| Operator | `and`, `or`, `not`, `within N of S`, `around N`, `byres S`, `expand N`, `first`, `last` |
+| Operator | `and`, `or`, `not`, `within N of S`, `around N`, `byres S`, `bychain S`, `bymol S`, `expand N`, `first`, `last` |
 | Value forms | lists `A+B+C`, ranges `10-20`, open ranges `10-`, wildcards `CA*`, negative resi `\-5` |
 | Numeric | `b > 70`, `b < 50`, `q = 1.0` (`>`, `<`, `>=`, `<=`, `=`, `!=`) |
 
@@ -145,6 +145,40 @@ the `Molecule` they already have. Requiring `.array` meant a `Molecule`
 found no annotations and returned an all-false mask — wrong answers, no
 error. `core.selection.as_atom_array` unwraps a `Molecule`, an
 `AtomStructure` or an `AtomArrayStack` before evaluation.
+
+**D-6b. Interactive selection reuses Blender's picking rather than replacing
+it.** Molecular Nodes builds a molecule so that vertex *i* is atom *i*
+(D-4), which makes Edit Mode's vertex selection an atom mask already: box,
+circle and lasso select need no equivalent in Gala. What Blender has no notion
+of is the *chemistry* — that a click should be able to mean a residue, and that
+a selection can have a name. `core/viewport.py` translates between the mesh
+selection flags and a mask in both directions; `expand_selection` grows a mask
+to `atom`/`residue`/`chain`/`fragment`/`object`, where a fragment is a
+connected component of the bond graph and falls back to the chain when the
+structure arrived without bonds.
+
+Writing a selection out has to set the edge and face flags too, not just the
+vertices: entering Edit Mode flushes edge selection *down* onto vertices, so a
+vertex-only write is undone the moment the user presses Tab.
+
+**D-6c. `describe_selection` is verified before it is returned.** The inverse
+of `select` — a mask rendered back as PyMOL syntax — is what lets a viewport
+pick be pasted into any other Gala call, into a `.pse`, or into PyMOL itself. A
+description that were merely *usually* right would be worse than none, so the
+candidate string is re-evaluated against the structure and used only if it
+reproduces the mask exactly. Structures where the chemical description is
+ambiguous (blank chain identifiers, residue numbers repeated under insertion
+codes) fall back to the positional `index 3+7-10` form, which always is.
+
+**D-6d. A named selection is a boolean attribute, under the name the user
+chose.** Not a Gala-private registry with its own file format: a boolean
+`POINT` attribute is what Molecular Nodes reads when a style is limited to a
+selection (`add_style(style, selection="pocket")` wires a Named Attribute node
+into the style's `Selection` socket), what `pymol/save.py` already writes out
+as a PyMOL selection, and what any hand-built geometry node tree can consume.
+Names are therefore left bare rather than prefixed. What distinguishes a user's
+selection from the dozen booleans Molecular Nodes stores on the same mesh is an
+explicit list on the object, in `core/attributes.py`.
 
 ---
 

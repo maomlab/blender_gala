@@ -109,6 +109,7 @@ Distances are in **ångström**. `within` includes the source selection;
 ```python
 "byres (protein within 4 of ligand)"   # whole residues, not clipped side chains
 "bychain (resi 45)"                    # every chain containing residue 45
+"bymol (resi 45)"                      # everything bonded to residue 45
 "first chain A"                        # the first matched atom
 "last protein"                         # the last matched atom
 ```
@@ -116,6 +117,92 @@ Distances are in **ångström**. `within` includes the source selection;
 `byres` is what you almost always want when selecting a binding site: without
 it you get whichever atoms happened to fall inside the sphere, and a rendered
 side chain sliced in half.
+
+`bymol` (also `byfrag`) follows the bond graph rather than the residue or
+chain annotations, which is how you grab a whole ligand or one strand of a
+complex. It needs a structure that arrived with bonds; without them it falls
+back to the chain.
+
+## Picking atoms in the viewport
+
+Selections do not have to be typed. Because Molecular Nodes builds a molecule
+so that vertex *i* is atom *i*, the atoms you select in Blender's Edit Mode
+**are** a selection — box select, circle select and lasso all work on atoms
+already. Gala adds the three things that were missing: a selection *level*, a
+readout in selection syntax, and a way to name what you picked.
+
+Tab into Edit Mode, select some atoms, then open the **Gala ▸ Selection**
+panel — or reach the same expansions from **Select ▸ Expand to Residue** while
+you are already in the Select menu.
+
+```python
+mask = gala.viewport_selection(mol)                  # what is picked, as a mask
+mask = gala.expand_viewport_selection(mol, "residue")  # grow it, and apply it
+text = gala.describe_viewport_selection(mol)         # 'chain A and resi 45-47'
+
+gala.set_viewport_selection(mol, "byres (ligand expand 4)")  # the other way
+```
+
+### Levels
+
+| Level | Grows a picked atom to |
+| --- | --- |
+| `atom` | itself — no change |
+| `residue` | every atom of its residue |
+| `chain` | every atom of its chain |
+| `fragment` | everything bonded to it |
+| `object` | the whole structure |
+
+Levels compose, so expanding to `residue` and then to `chain` grows the
+residues to their chains, the way PyMOL's selection modes behave.
+
+### Reading a selection back
+
+`describe_selection` turns a mask into a selection string, and verifies it: the
+string is re-evaluated against the structure and only returned if it selects
+exactly the same atoms. Structures where the chemical description would be
+ambiguous — repeated residue numbers under insertion codes, blank chain
+identifiers — fall back to the positional `index 3+7-10` form, which is always
+exact.
+
+```python
+>>> gala.describe_selection(mol, gala.select(mol, "name CA"))
+'chain A and resi 1-7 and name CA'
+```
+
+## Named selections
+
+A named selection — PyMOL's `sele` — is stored as a boolean attribute on the
+mesh, which is the same thing three other tools already read:
+
+```python
+gala.create_alias(mol, "pocket")                 # names what is picked
+gala.create_alias(mol, "core", "b > 70")         # or names a selection string
+gala.list_aliases(mol)                           # {'pocket': mask, 'core': mask}
+gala.select_alias(mol, "pocket")                 # select it again later
+gala.alias_combine(mol, "pocket", mode="union")  # add the current pick to it
+gala.delete_alias(mol, "core")
+```
+
+Because the attribute name is what Molecular Nodes reads, a named selection can
+be styled on its own — which is how a pocket gets sticks while the rest of the
+protein stays a cartoon:
+
+```python
+mol.add_style("cartoon")
+gala.style_alias(mol, "pocket", style="ball_and_stick")
+```
+
+That adds a style branch limited to the selection and leaves the existing
+styles alone. The equivalent in Molecular Nodes' own API is
+`mol.add_style("ball_and_stick", selection="pocket")`, and in the geometry node
+editor it is a Named Attribute node wired into the style's `Selection` socket.
+
+Named selections also survive the round trip to PyMOL:
+
+```python
+gala.save_session("figure.pse", selections=["pocket"])
+```
 
 ## Recipes
 
