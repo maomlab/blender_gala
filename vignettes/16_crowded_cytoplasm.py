@@ -99,10 +99,15 @@ SPECIES = (
 heading("1. Four proteins, each one flat colour")
 # ---------------------------------------------------------------------------
 # Surfaces rather than cartoons: at this scale a ribbon is a scribble, and the
-# thing being shown is how much room each molecule takes up. `quality=2` is a
-# coarser surface than the default, which is invisible at forty molecules
-# across the frame and is the difference between a scene that renders and one
-# that does not.
+# thing being shown is how much room each molecule takes up.
+#
+# `quality=1` is much coarser than the default, and the number matters more
+# than it looks. Freestyle builds a view map over every triangle it can see,
+# and there are a hundred and twenty molecules here: at quality 2 this scene
+# peaks at 23 GB and is killed on a 16 GB CI runner, and at quality 1 it peaks
+# at 6.6 GB and renders in a third of the time. Across a hundred molecules a
+# few hundred pixels wide the two are indistinguishable — the outline is doing
+# the work, not the tessellation.
 scene = bpy.context.scene
 crowd_collection = bpy.data.collections.new("GALA Crowd Species")
 scene.collection.children.link(crowd_collection)
@@ -110,7 +115,7 @@ scene.collection.children.link(crowd_collection)
 species = []
 for index, (code, name, colour, abundance) in enumerate(SPECIES):
     molecule = load_structure(code)
-    molecule.add_style(mn.StyleSurface(quality=2), color=None)
+    molecule.add_style(mn.StyleSurface(quality=1), color=None)
     gala.color_by_selection(molecule, {"all": colour})
     gala.assign_material(
         molecule,

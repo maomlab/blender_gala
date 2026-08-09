@@ -408,6 +408,14 @@ four sources per point, drawn with **Freestyle** — Blender's line renderer —
 through an **orthographic camera**, so a molecule at the back is the same size
 as one at the front.
 
+Freestyle is what makes the style, and it is also what makes this the most
+expensive figure here: it builds a view map over every triangle it can see, and
+there are a hundred and twenty molecules. The surfaces are therefore built at
+`quality=1` — at the default this scene peaks at 23 GB and is killed on a 16 GB
+CI runner, and at `quality=1` it peaks at 6.6 GB. Across molecules a few
+hundred pixels wide the two are indistinguishable, because the outline is doing
+the work rather than the tessellation.
+
 The packing is quantitative: positions are rejection-sampled with each
 species' own exclusion radius and the vignette reports the volume fraction it
 reached. It lands near 10% against the 20-30% of real cytoplasm, and the
