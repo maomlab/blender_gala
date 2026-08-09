@@ -97,7 +97,7 @@ gala.setup_compositor(
 
 ![The node graph setup_compositor builds: render layers into denoise into the
 output, three cryptomatte pickers, and a file output node with a slot per
-pass](../images/compositor/chain.png)
+pass](../images/compositor/chain.webp)
 
 Every node Gala adds is named with a `GALA` prefix and removed before
 rebuilding, so calling this repeatedly rewires rather than accumulating
@@ -166,7 +166,7 @@ gala.highlight_matte(
 ```
 
 ![The highlight node graph: the EXR feeding a cryptomatte node and an
-exposure-and-saturation pair, mixed together by the matte](../images/compositor/highlight.png)
+exposure-and-saturation pair, mixed together by the matte](../images/compositor/highlight.webp)
 
 The nodes are Gala-prefixed like the rest, so re-running replaces the knock-back
 rather than stacking another one on it, and `clear_compositor` removes it.
@@ -176,20 +176,20 @@ to `highlight_matte`:
 
 <div class="grid cards" markdown>
 
-- ![Haemoglobin, all four chains in colour](../images/05_compositing_beauty.png)
+- ![Haemoglobin, all four chains in colour](../images/05_compositing_beauty.webp)
 
     **The render.** Two alpha subunits in blue, two beta in orange, four hemes
     in red.
 
-- ![The two alpha subunits in colour, the rest grey](../images/05_compositing_passes.png)
+- ![The two alpha subunits in colour, the rest grey](../images/05_compositing_passes.webp)
 
     `highlight_matte(["GALA alpha 1", "GALA alpha 2"])`
 
-- ![The two beta subunits in colour, the rest grey](../images/05_compositing_beta.png)
+- ![The two beta subunits in colour, the rest grey](../images/05_compositing_beta.webp)
 
     `highlight_matte(["GALA beta 1", "GALA beta 2"])`
 
-- ![The four hemes in red, the protein grey](../images/05_compositing_heme.png)
+- ![The four hemes in red, the protein grey](../images/05_compositing_heme.webp)
 
     `highlight_matte("GALA heme")`
 
@@ -249,7 +249,7 @@ gala.depth_cue(near=140.0, far=215.0)   # angstrom from the camera
 ```
 
 ![Haemoglobin with depth cueing: the far side fades into the
-background](../images/05_compositing_depth_cue.png){ width="380" }
+background](../images/05_compositing_depth_cue.webp){ width="380" }
 
 Geometry at `near` is untouched; geometry at `far` fades fully into the
 background. The range is measured from the camera, so it has to bracket where
@@ -269,7 +269,7 @@ and looks like a broken render.
 The same options live in **Scene Setup ▸ Passes and Compositing**, with a
 *Set Up Compositor* button that calls `setup_compositor` with them:
 
-![The Passes and Compositing panel](../images/ui/compositing.png){ width="300" }
+![The Passes and Compositing panel](../images/ui/compositing.webp){ width="300" }
 
 The EXR directory shows red because its default, `//passes`, is relative to the
 .blend file — Blender marks relative paths in these fields. It is not an error.

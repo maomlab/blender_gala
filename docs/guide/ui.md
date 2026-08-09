@@ -5,7 +5,7 @@ Everything Gala does is available from a **Gala** tab in the 3D View sidebar
 calls exactly one Python API function, so nothing is available in the UI that
 is not scriptable, and vice versa.
 
-![The Gala sidebar tab](../images/ui/sidebar.png){ width="280" }
+![The Gala sidebar tab](../images/ui/sidebar.webp){ width="280" }
 
 ## Panels
 
@@ -24,12 +24,12 @@ Sub-panels:
 - **Passes and Compositing** — cryptomatte, the EXR output directory, depth of
   field, depth cue, and a *Render Still* button.
 
-![The Scene Setup panel, sub-panels open](../images/ui/scene-setup.png){ width="250" }
+![The Scene Setup panel, sub-panels open](../images/ui/scene-setup.webp){ width="250" }
 
 The EXR directory shows red because its default, `//passes`, is relative to the
 .blend file — Blender marks relative paths in these fields. It is not an error.
 
-![The Passes and Compositing sub-panel](../images/ui/compositing.png){ width="250" }
+![The Passes and Compositing sub-panel](../images/ui/compositing.webp){ width="250" }
 
 *Set Up Compositor* builds the node graph shown in the
 [compositing guide](compositing.md); *Render Still* renders through it.
@@ -39,7 +39,7 @@ The EXR directory shows red because its default, `//passes`, is relative to the
 Two selection fields and a grid of interaction types. *Find Interactions*
 detects and draws them; the trash button clears them.
 
-![The Interactions panel](../images/ui/interactions.png){ width="250" }
+![The Interactions panel](../images/ui/interactions.webp){ width="250" }
 
 ### Measure
 
@@ -47,14 +47,14 @@ Select 2–4 atoms in Edit Mode and press *Measure*: Gala picks distance, angle
 or dihedral from how many you selected. Or type selection strings separated by
 `;` to do the same without leaving Object Mode.
 
-![The Measure panel](../images/ui/measure.png){ width="250" }
+![The Measure panel](../images/ui/measure.webp){ width="250" }
 
 ### Label
 
 Selection, template, level, style and size. The template accepts `{chain}`,
 `{resi}`, `{resn}`, `{one}`, `{name}`, `{elem}`, `{b}` and `{q}`.
 
-![The Label panel](../images/ui/label.png){ width="250" }
+![The Label panel](../images/ui/label.webp){ width="250" }
 
 ### Colour
 
@@ -63,11 +63,11 @@ picker. Choosing **CSV File** adds the column names to read it with.
 
 === "pLDDT"
 
-    ![The Colour panel set to pLDDT](../images/ui/colour.png){ width="250" }
+    ![The Colour panel set to pLDDT](../images/ui/colour.webp){ width="250" }
 
 === "CSV file"
 
-    ![The Colour panel set to a CSV file](../images/ui/colour-csv.png){ width="250" }
+    ![The Colour panel set to a CSV file](../images/ui/colour-csv.webp){ width="250" }
 
 ### PyMOL Session
 
@@ -75,7 +75,7 @@ picker. Choosing **CSV File** adds the column names to read it with.
 colours, measurements and the camera. *Save PyMOL Session* writes the scene
 back out as one.
 
-![The PyMOL Session panel](../images/ui/pymol.png){ width="250" }
+![The PyMOL Session panel](../images/ui/pymol.webp){ width="250" }
 
 Both open a file browser with their own options in its sidebar: which state to
 build, and whether to bring across representations, colours, the camera, and

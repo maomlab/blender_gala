@@ -381,8 +381,18 @@ def save_blend(name: str) -> str:
     return path
 
 
-def render(gala, name: str, scene=None, extension: str = "png") -> str:
+def render(
+    gala, name: str, scene=None, extension: str = "webp", quality: int = 92
+) -> str:
     """Render a scene into ``docs/images``.
+
+    WebP rather than PNG, and for the same reason the animations are WebP: it
+    keeps a real alpha channel and the full colour range at a fraction of the
+    size. A path-traced molecule is a photographic image — smooth gradients,
+    soft shadows, a little sampling noise — which is exactly what PNG cannot
+    compress and what a modern lossy codec is built for. Across the figures in
+    this repository it is the difference between fifty megabytes and five, with
+    nothing visible to show for the fifty.
 
     Parameters
     ----------
@@ -393,17 +403,34 @@ def render(gala, name: str, scene=None, extension: str = "png") -> str:
     scene : bpy.types.Scene, optional
         Scene to render. Defaults to the active one.
     extension : str, optional
-        File extension, which has to agree with the scene's image format. PNG
-        is lossless and right for a figure; a large detail render is several
-        times smaller as WebP and no worse to look at.
+        ``"webp"`` or ``"png"``. The scene's image format is set to match, so
+        the two cannot disagree.
+    quality : int, optional
+        WebP quality. 92 is past the point where a difference is visible on a
+        render and well before the point where the file stops being small.
 
     Returns
     -------
     str
         The path written.
     """
+    import bpy
+
     os.makedirs(IMAGE_DIR, exist_ok=True)
     path = os.path.join(IMAGE_DIR, f"{name}.{extension}")
+
+    # RGBA throughout: most of these figures render onto a transparent film so
+    # they can drop onto a page of any colour, and an alpha channel that is
+    # dropped on the way to disk is the one bug in this pipeline that nobody
+    # notices until the figure is in a manuscript.
+    target = scene or bpy.context.scene
+    gala.scene.render.set_image_format(
+        target.render.image_settings,
+        {"webp": "WEBP", "png": "PNG"}[extension],
+        color_mode="RGBA",
+        quality=quality,
+    )
+
     if scene is None:
         gala.render(path)
     else:

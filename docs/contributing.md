@@ -82,6 +82,32 @@ checks the output is unchanged.
 
 ## Documentation images
 
+### Image formats
+
+Everything served from the documentation is **WebP**, and nothing in the
+repository is PNG. A path-traced molecule is a photographic image — smooth
+gradients, soft shadows, a little sampling noise — which is what PNG cannot
+compress and what a modern lossy codec is built for. Converting the figures
+took `docs/images` from 45 MB to 4 MB with nothing visible to show for the
+difference, and `.gitignore` refuses PNGs there so it stays that way.
+
+The two settings that matter:
+
+- **Renders** are written by Blender at quality 92, in RGBA, by
+  `_common.render()` — so a vignette cannot write one format and name it
+  another, and a transparent film keeps its alpha all the way to disk.
+- **Screenshots and the hero** are lossless WebP, because a lossy codec rings
+  around type and those images are mostly type. Lossless WebP is still around
+  half the size of the PNG it replaces.
+
+The animations are WebP too, for the same reasons plus one more: as ordinary
+images they need no `<video>` element, so they work in Markdown, in the
+GitHub README and on the site without three code paths.
+
+The one exception is `docs/images/listing/`, which is PNG because
+extensions.blender.org takes PNG and JPEG. Those are uploaded rather than
+served, so they are build output and are not committed.
+
 The rendered figures in [Vignettes](vignettes.md) come from `make vignettes`.
 The material gallery downloads a few megabytes of CC0 textures from Poly Haven
 on its first run and caches them in `build/textures`; without network it draws

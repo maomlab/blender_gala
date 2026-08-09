@@ -37,7 +37,7 @@ shortest honest path through a job you would otherwise do by hand.
 
 ### 1. A publication figure
 
-![01_publication_figure](images/01_publication_figure.png)
+![01_publication_figure](images/01_publication_figure.webp)
 
 `01_publication_figure.py` — load a structure, style it, and go from the
 default scene to a transparent-background 300 dpi figure in one
@@ -46,7 +46,7 @@ report it returns.
 
 ### 2. A binding site
 
-![02_binding_site](images/02_binding_site.png)
+![02_binding_site](images/02_binding_site.webp)
 
 `02_binding_site.py` — find every interaction between a ligand and its pocket,
 draw them as dashed lines, quote the polar distances, and label the closest
@@ -59,7 +59,7 @@ protein. The full Objective 2 workflow.
 
 ### 3. Measuring
 
-![03_measurements](images/03_measurements.png)
+![03_measurements](images/03_measurements.webp)
 
 `03_measurements.py` — the distance that decides whether a GPCR is activated.
 Aranda-García et al.
@@ -78,7 +78,7 @@ or a dihedral.
 
 ### 4. AlphaFold confidence
 
-![04_alphafold_confidence](images/04_alphafold_confidence.png)
+![04_alphafold_confidence](images/04_alphafold_confidence.webp)
 
 `04_alphafold_confidence.py` — fetch human p53 from the AlphaFold database,
 colour it by pLDDT with the official confidence bands, print the legend, and
@@ -88,7 +88,7 @@ core comes out dark blue and its disordered arms orange.
 
 ### 5. Compositing passes
 
-![05_compositing_passes](images/05_compositing_passes.png)
+![05_compositing_passes](images/05_compositing_passes.webp)
 
 `05_compositing_passes.py` — haemoglobin rendered once, cut into four figures.
 A talk needs the same picture with a different subunit carrying the argument
@@ -106,7 +106,7 @@ rather than another pass through Cycles.
 
 | The render | Beta subunits | The hemes |
 | --- | --- | --- |
-| ![The render, all four chains coloured](images/05_compositing_beauty.png) | ![The beta subunits highlighted](images/05_compositing_beta.png) | ![The hemes highlighted](images/05_compositing_heme.png) |
+| ![The render, all four chains coloured](images/05_compositing_beauty.webp) | ![The beta subunits highlighted](images/05_compositing_beta.webp) | ![The hemes highlighted](images/05_compositing_heme.webp) |
 
 It also sets up depth of field, and renders the one variant that cannot be done
 after the fact — depth cueing, which needs the Z pass at render time. The
@@ -130,7 +130,7 @@ every push should be doing.
 
 ### 7. Electrostatics
 
-![07_electrostatics](images/07_electrostatics.png)
+![07_electrostatics](images/07_electrostatics.webp)
 
 `07_electrostatics.py` — barnase and barstar, each solved on its own with
 PDB2PQR and APBS, then opened out like a book so both binding faces are in
@@ -148,7 +148,7 @@ the same map, lit rather than drawn. Needs `apbs` and `pdb2pqr`;
 
 ### 8. PyMOL sessions
 
-![08_pymol_session](images/08_pymol_session.png)
+![08_pymol_session](images/08_pymol_session.webp)
 
 `08_pymol_session.py` — the round trip. It reads a session PyMOL itself wrote
 (the one the tests use), reports what is in it without needing PyMOL
@@ -180,7 +180,7 @@ scene rather than the handful of points it grew from.
 
 ### 9. A capsid, built by instancing
 
-![09_capsid_assembly](images/09_capsid_assembly.png)
+![09_capsid_assembly](images/09_capsid_assembly.webp)
 
 `09_capsid_assembly.py` — satellite tobacco mosaic virus, the smallest
 icosahedral virus there is: sixty copies of one coat protein in a shell 170 Å
@@ -195,7 +195,7 @@ is still there underneath.
 
 ### 10. A membrane
 
-![10_membrane](images/10_membrane.png)
+![10_membrane](images/10_membrane.webp)
 
 `10_membrane.py` — bacteriorhodopsin, put back in the bilayer its crystal
 structure left out. The membrane is a thousand instanced lipids across two
@@ -213,7 +213,7 @@ as lipids, and sit exactly where the modelled ones meet the protein.
 
 ### 11. One fold, nine ways
 
-![11_material_gallery](images/11_material_gallery.png)
+![11_material_gallery](images/11_material_gallery.webp)
 
 `11_material_gallery.py` — the same ubiquitin nine times, differing in nothing
 but what it is made of: same camera, same lights, same coordinates. Each copy
@@ -293,7 +293,7 @@ both are black over nothing.
 
 | The Gala material | The same, with three nodes added |
 | --- | --- |
-| ![12_procedural_plain](images/12_procedural_plain.png) | ![12_procedural_shading](images/12_procedural_shading.png) |
+| ![12_procedural_plain](images/12_procedural_plain.webp) | ![12_procedural_shading](images/12_procedural_shading.webp) |
 
 `12_procedural_shading.py` — `build_material` returns a node tree, and the
 shader editor is where the rest of Blender's texturing lives. Three additions
@@ -313,7 +313,7 @@ underneath still means what its legend says.
 
 | Open (4AKE) | Closed (1AKE) |
 | --- | --- |
-| ![13_morph_open](images/13_morph_open.png) | ![13_morph_closed](images/13_morph_closed.png) |
+| ![13_morph_open](images/13_morph_open.webp) | ![13_morph_closed](images/13_morph_closed.webp) |
 
 `13_conformational_morph.py` — adenylate kinase closing on its substrate,
 animated with a **shape key**: a second set of vertex positions and a slider
@@ -338,7 +338,7 @@ every frame from the interpolated atoms.
 
 | Wide | Close |
 | --- | --- |
-| ![14_focus_wide](images/14_focus_wide.png) | ![14_focus_pull](images/14_focus_pull.png) |
+| ![14_focus_wide](images/14_focus_wide.webp) | ![14_focus_pull](images/14_focus_pull.webp) |
 
 `14_focus_pull.py` — from an establishing shot of the Abl kinase domain to a
 close-up on imatinib in its pocket, without a cut. Both poses are computed
@@ -385,7 +385,7 @@ The move itself, from `make vignettes-focus-pull`.
 
 ### 15. A designed protein
 
-![15_designed_protein](images/15_designed_protein.png)
+![15_designed_protein](images/15_designed_protein.webp)
 
 `15_designed_protein.py` — Top7, the first protein designed with a fold that
 had never been observed in nature, lit the way a design lab lights one for a
@@ -399,7 +399,7 @@ show* — and the background is part of the picture.
 
 ### 16. A crowded cytoplasm
 
-![16_crowded_cytoplasm](images/16_crowded_cytoplasm.png)
+![16_crowded_cytoplasm](images/16_crowded_cytoplasm.webp)
 
 `16_crowded_cytoplasm.py` — after David Goodsell: flat colour, ink outlines,
 everything at one scale, and no empty space. Four *E. coli* proteins in

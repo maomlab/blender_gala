@@ -33,7 +33,7 @@ this still needs the restart once. Afterwards it will not happen again.
 
 Press `N` in the 3D View and you should see a **Gala** tab.
 
-![The Gala tab in the 3D View sidebar](../images/ui/sidebar.png){ width="280" }
+![The Gala tab in the 3D View sidebar](../images/ui/sidebar.webp){ width="280" }
 
 !!! note "No bundled dependencies"
 

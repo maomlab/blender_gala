@@ -298,7 +298,7 @@ def run(shot: Shot, blender: str, work_dir: str, blend: str) -> None:
         sys.stderr.write(result.stderr[-2000:])
         raise SystemExit(f"{shot.name}: Blender produced no screenshot")
 
-    crop(raw_path, meta_path, os.path.join(IMAGE_DIR, f"{shot.name}.png"))
+    crop(raw_path, meta_path, os.path.join(IMAGE_DIR, f"{shot.name}.webp"))
 
 
 def main(argv: list[str]) -> None:

@@ -15,7 +15,7 @@ start with [Getting started](https://maomlab.github.io/blender_gala/guide/gettin
 
 ![The Gala sidebar open in Blender, with arrows to the figures it produces:
 publication scenes, interactions, measurements, colouring by data, compositing
-passes and animation](docs/images/hero.png)
+passes and animation](docs/images/hero.webp)
 
 [Molecular Nodes](https://bradyajohnston.github.io/MolecularNodes) brought
 molecules into Blender and gave them Blender's rendering. Blender Gala adds the

@@ -26,6 +26,11 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGE_DIR = os.path.join(HERE, "docs", "images")
 OUT_DIR = os.path.join(IMAGE_DIR, "listing")
 
+#: PNG on purpose, and the only PNG this project still writes: everything in
+#: `docs/images` is WebP, but the extensions platform takes PNG and JPEG and
+#: these are uploaded rather than served. They are build output, so they are
+#: not committed either.
+#:
 #: The thumbnail the platform renders. Matching it exactly means nothing is
 #: scaled twice.
 SIZE = (1920, 1080)
@@ -37,12 +42,12 @@ BACKGROUND = (24, 24, 24)
 #: Source figure, and the caption it illustrates on the listing. Ordered: the
 #: first is what someone sees before clicking anything.
 PREVIEWS = (
-    ("hero.png", "01-overview"),
-    ("01_publication_figure.png", "02-publication-figure"),
-    ("02_binding_site.png", "03-binding-site"),
-    ("03_measurements.png", "04-measurements"),
-    ("07_electrostatics.png", "05-electrostatics"),
-    ("08_pymol_session.png", "06-pymol-session"),
+    ("hero.webp", "01-overview"),
+    ("01_publication_figure.webp", "02-publication-figure"),
+    ("02_binding_site.webp", "03-binding-site"),
+    ("03_measurements.webp", "04-measurements"),
+    ("07_electrostatics.webp", "05-electrostatics"),
+    ("08_pymol_session.webp", "06-pymol-session"),
 )
 
 #: Fraction of the canvas the figure fills. Short of 1 so nothing touches the
