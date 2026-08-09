@@ -165,9 +165,19 @@ own opinion, so a new release of any of them turns CI red with no commit here.
 That is not hypothetical — a change to how the Blender stubs type
 `evaluated_depsgraph_get` did exactly that.
 
-To bump one, raise the pin, run `make lint typecheck`, and fix what the new
-version has found in the same commit. Then the failure arrives when someone is
-looking at it.
+The `docs` extra is pinned the same way, and CI installs it rather than a list
+of its own. The site is built with `--strict`, so a warning a new release
+decides to emit is a failed build.
+
+`ruff` is in the `docs` extra as well as the `dev` one, which looks redundant
+and is not: `separate_signature` asks mkdocstrings to lay a signature out over
+several lines and it needs Black or Ruff installed to do it. Without one it
+says so at INFO level, which `--strict` does not catch, and renders
+`publication_setup`'s seventeen parameters as one unbroken line.
+
+To bump any of them, raise the pin, run `make lint typecheck docs`, and fix
+what the new version has found in the same commit. Then the failure arrives
+when someone is looking at it.
 
 ## Adding a feature
 

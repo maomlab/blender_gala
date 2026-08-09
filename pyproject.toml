@@ -52,10 +52,31 @@ apbs = [
     "apbs-binary>=3.4.1",
     "pdb2pqr>=3.6",
 ]
+# Pinned for the same reason as the `dev` tools, and with one addition: the
+# site is built with `--strict`, so a warning a new release decides to emit is
+# a failed build. `mkdocs-material` is already announcing breaking changes for
+# MkDocs 2.0, which is exactly the kind of thing that should arrive on a commit
+# that raises this pin rather than on an unrelated pull request.
+#
+# `mkdocstrings-python` is pinned separately from `mkdocstrings[python]`: the
+# handler is the thing that renders the API reference, it releases on its own
+# schedule, and the extra only asks for "some version of it".
+#
+# These are the four top-level packages. Their own dependencies float, which is
+# the usual bargain — a lock file is the next step if that ever bites.
 docs = [
-    "mkdocs>=1.6",
-    "mkdocs-material>=9.5",
-    "mkdocstrings[python]>=0.26",
+    "mkdocs==1.6.1",
+    "mkdocs-material==9.7.7",
+    "mkdocstrings==1.0.6",
+    "mkdocstrings-python==2.0.5",
+    # Not a mistake, and not only for linting: `separate_signature` asks
+    # mkdocstrings to lay a signature out over several lines, and it needs
+    # Black or Ruff installed to do it. Without one, it says so at INFO level
+    # and quietly renders `publication_setup`'s seventeen parameters as a
+    # single unbroken line. The lint job had ruff and the docs job did not, so
+    # the site was published with the unreadable version while every local
+    # build looked right.
+    "ruff==0.16.2",
 ]
 
 [project.urls]
