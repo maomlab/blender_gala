@@ -539,6 +539,8 @@ def _evaluated_points(obj: Any) -> np.ndarray | None:
         depsgraph = bpy.context.evaluated_depsgraph_get()
     except (AttributeError, RuntimeError):  # pragma: no cover - no depsgraph
         return None
+    if depsgraph is None:  # pragma: no cover - a context with no scene in it
+        return None
 
     # Instances are read through their source mesh rather than one at a time: a
     # capsid is sixty copies of one surface and a crowded scene is thousands of
