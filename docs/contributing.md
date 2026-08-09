@@ -157,6 +157,18 @@ consistent with each other between runs.
 - NumPy-style docstrings, which is what `mkdocstrings` renders.
 - Comments explain *why*. What the code does should be evident from the code.
 
+`ruff`, `mypy` and `fake-bpy-module` are pinned to exact versions in the `dev`
+extra, and CI installs that extra rather than a list of its own — so the
+versions that decide whether CI is green are the versions `make venv` gives
+you. These three are not ordinary dependencies: they gate the build on their
+own opinion, so a new release of any of them turns CI red with no commit here.
+That is not hypothetical — a change to how the Blender stubs type
+`evaluated_depsgraph_get` did exactly that.
+
+To bump one, raise the pin, run `make lint typecheck`, and fix what the new
+version has found in the same commit. Then the failure arrives when someone is
+looking at it.
+
 ## Adding a feature
 
 1. If it involves a design choice, record it in `SPECIFICATION.md` with a

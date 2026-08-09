@@ -23,12 +23,22 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+# The three tools that decide whether CI is green are pinned exactly, and the
+# rest are floors. A linter, a type checker and a set of type stubs are not
+# ordinary dependencies: they gate the build on *their* opinion, so a new
+# release of any of them turns CI red with no commit on this repository —
+# which is precisely what a stub change to `evaluated_depsgraph_get` did.
+# Pinned, that failure arrives when someone bumps the number here and can look
+# at it, rather than on an unrelated pull request at an unrelated moment.
+#
+# Bump them deliberately: raise the pin, run `make lint typecheck`, and fix
+# what the new version has found in the same commit.
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "ruff>=0.6",
-    "mypy>=1.11",
-    "fake-bpy-module>=20240604",
+    "ruff==0.16.2",
+    "mypy==2.3.0",
+    "fake-bpy-module==20260809",
     # scripts/capture_ui.py crops the panel screenshots outside Blender.
     "pillow>=10.0",
     "numpy>=1.24",

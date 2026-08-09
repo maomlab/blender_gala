@@ -22,8 +22,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # From the `dev` extra rather than a list repeated here, so the versions
+      # CI lints with are the versions `make dev` installs. Two copies of a
+      # toolchain drift, and the one that drifts is always the one nobody is
+      # looking at.
       - name: Install the toolchain
-        run: python -m pip install --upgrade "ruff>=0.6" "mypy>=1.11" fake-bpy-module numpy
+        run: python -m pip install -e ".[dev]"
 
       - name: Lint
         run: |
