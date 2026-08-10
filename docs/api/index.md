@@ -1,9 +1,12 @@
 # API reference
 
-Everything on this page is importable from the top-level package:
+Everything on this page is importable from the top-level package. Installed
+as an extension, that package is `bl_ext.<repository>.blender_gala`, the
+repository being wherever you installed it from — see
+[Getting started](../guide/getting-started.md):
 
 ```python
-import blender_gala as gala
+from bl_ext.user_default import blender_gala as gala
 ```
 
 ## Scene setup

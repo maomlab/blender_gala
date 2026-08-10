@@ -22,8 +22,8 @@ structure to a publication-ready image, and measuring and annotating what is in
 the scene — the things PyMOL and Mol* do without being asked.
 
 ```python
-import molecularnodes as mn
-import blender_gala as gala
+from bl_ext.user_default import blender_gala as gala
+from bl_ext.blender_org import molecularnodes as mn
 
 mol = mn.Molecule.fetch("1ake").add_style("cartoon")
 
@@ -153,8 +153,11 @@ make install   # build and install into your Blender
 ## A worked example
 
 ```python
-import molecularnodes as mn
-import blender_gala as gala
+# Extensions import as `bl_ext.<repository>.<id>`, where the repository is
+# where you installed it: `user_default` for a zip, `blender_org` for the
+# extensions platform.
+from bl_ext.user_default import blender_gala as gala
+from bl_ext.blender_org import molecularnodes as mn
 
 # 1. Load a ligand complex and style it.
 mol = mn.Molecule.fetch("1stp")

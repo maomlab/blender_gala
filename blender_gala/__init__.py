@@ -9,8 +9,11 @@ Quick start
 -----------
 ::
 
-    import molecularnodes as mn
-    import blender_gala as gala
+    # An extension imports as ``bl_ext.<repository>.<id>``, the repository
+    # being where it was installed from: ``user_default`` for a zip,
+    # ``blender_org`` for the extensions platform.
+    from bl_ext.user_default import blender_gala as gala
+    from bl_ext.blender_org import molecularnodes as mn
 
     mol = mn.Molecule.fetch("1ake").add_style("cartoon")
 
