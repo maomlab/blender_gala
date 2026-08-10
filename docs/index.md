@@ -12,8 +12,8 @@ getting from a freshly imported structure to a publication-ready image, and
 measuring and annotating what is in the scene.
 
 ```python
-import molecularnodes as mn
-import blender_gala as gala
+from bl_ext.user_default import blender_gala as gala
+from bl_ext.blender_org import molecularnodes as mn
 
 mol = mn.Molecule.fetch("1ake").add_style("cartoon")
 

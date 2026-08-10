@@ -47,8 +47,8 @@ Press `N` in the 3D View and you should see a **Gala** tab.
 Open the Scripting workspace and run:
 
 ```python
-import molecularnodes as mn
-import blender_gala as gala
+from bl_ext.user_default import blender_gala as gala
+from bl_ext.blender_org import molecularnodes as mn
 
 # Molecular Nodes loads and styles the molecule.
 mol = mn.Molecule.fetch("1ake")
@@ -58,6 +58,30 @@ mol.add_style("cartoon")
 report = gala.publication_setup(mol, preset="figure")
 print(report)
 ```
+
+!!! note "Why `bl_ext` and not `import blender_gala`?"
+
+    Because the bare names do not resolve, and the error —
+    `ModuleNotFoundError: No module named 'blender_gala'` — reads like a
+    failed install when the add-on is in fact working.
+
+    A Blender extension is imported as `bl_ext.<repository>.<id>`, and the
+    repository is simply *where you installed it*, chosen by the route you
+    took above:
+
+    | Installed via | Repository | Import |
+    | --- | --- | --- |
+    | *Get Extensions* (extensions.blender.org) | `blender_org` | `from bl_ext.blender_org import molecularnodes as mn` |
+    | *Install from Disk…* (a `.zip`) | `user_default` | `from bl_ext.user_default import blender_gala as gala` |
+
+    The two lines differ only because the two add-ons arrive by different
+    routes: Molecular Nodes is on the extensions platform, Gala is a zip
+    from the releases page. Follow the install steps above and these are the
+    paths you get. The bare name works only for a development checkout on
+    `sys.path`.
+
+    A script meant to run on someone else's machine cannot assume either
+    repository — adjust the import to match how that machine was set up.
 
 `publication_setup` prints a summary of what it changed:
 

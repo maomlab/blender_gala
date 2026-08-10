@@ -5,7 +5,7 @@ and writes them directly, so a session becomes a Blender scene and a Blender
 scene becomes a session:
 
 ```python
-import blender_gala as gala
+from bl_ext.user_default import blender_gala as gala
 
 result = gala.load_session("figure.pse")
 print(result.summary())

@@ -6,7 +6,7 @@ charges and radii, APBS solves the Poisson–Boltzmann equation on a grid — an
 paints the result onto a translucent molecular surface.
 
 ```python
-import blender_gala as gala
+from bl_ext.user_default import blender_gala as gala
 
 surface = gala.electrostatic_surface(mol, ramp=5.0, alpha=0.6)
 print(surface.summary())
