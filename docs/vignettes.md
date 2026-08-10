@@ -423,3 +423,47 @@ reason is worth knowing — a protein's bounding sphere is several times the
 protein, so packing spheres jams long before a cell does. Real molecules
 interlock, which is what purpose-built packers model and what shrinking the
 exclusion radius here stands in for.
+
+### 17. A halftone facade
+
+![17_halftone_facade](images/17_halftone_facade.webp)
+
+`17_halftone_facade.py` — after Elena Manferdini. For *Building the Picture*
+she traced Mies van der Rohe's 860-880 Lake Shore Drive into a drawing of its
+grid, then multiplied the grid, wove the lines and infused colour and line
+weight until the structure came back as ornament — work meant to be read twice,
+as a field of marks up close and as a building from across the room.
+
+The facade here is measured rather than borrowed. A class A GPCR is seven
+transmembrane helices standing in a membrane: a colonnade with a floor slab top
+and bottom. The vignette finds the runs of helical alpha carbons, takes each
+one's centre and width as a column and the ends of the bundle as the slabs, and
+repeats that motif across the sheet.
+
+The subject is the apparatus of seeing a colour. **Rhodopsin** (1F88), the rod
+pigment, is achromatic — form and brightness and nothing else — so it is the
+**black key plate**. The three cone opsins, none of which has an experimental
+structure and all of which come from **AlphaFold**, are the **colour
+separations**, and they register onto rhodopsin at about 1 Å. The joke the
+picture is built on is that the "red" cone peaks at 564 nm, which is
+yellow-green: there is no red pigment in the eye, and red is constructed out of
+the difference between two proteins a handful of side chains apart. So the L
+plate is screened at 0°, the angle a printer gives the yellow plate, and inked
+in coral.
+
+Nothing in the scene is lit. Every surface is `Transparent` mixed with
+`Emission`, and a Mix Shader is a linear blend, so the shader *is* source-over
+compositing — ink laid on what is behind it. The halftone is built in **window
+coordinates**, so one screen covers the whole sheet no matter what is under it,
+rotated to each plate's own angle from the printer's standard set (0°, 15°,
+45°, 75°, black on 45° where the eye is worst at seeing a screen). Dot radius
+is `sqrt(tone/π)`, so dot *area* tracks tone and a mid tone reads as a mid tone
+instead of as a pattern; tone comes from view depth, which is PyMOL's depth cue
+restated as a quantity of ink.
+
+The other things worth stealing from it: `superimpose_homologs` for putting
+non-identical relatives in register (matching by residue number misregisters
+these plates by 20 Å), pLDDT used as a **mask** rather than a colour so an
+AlphaFold model's disordered tails never reach the plate, and `create_alias`
+plus `style_alias` to keep the second copy of a crystallographic dimer out of
+the picture without hiding anything after the fact.
