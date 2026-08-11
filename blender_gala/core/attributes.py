@@ -26,6 +26,7 @@ alias from the dozen booleans Molecular Nodes stores (``is_solvent``,
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -34,6 +35,7 @@ import numpy as np
 
 __all__ = [
     "REGISTRY_KEY",
+    "attribute_conflict",
     "delete_boolean",
     "list_booleans",
     "named_selections",
@@ -124,6 +126,45 @@ def read_boolean(obj: Any, name: str, n_atoms: int | None = None) -> np.ndarray 
     return values
 
 
+def attribute_conflict(obj: Any, name: str) -> str | None:
+    """Say why a mask cannot be stored under ``name``, or ``None`` if it can.
+
+    Attribute names are bare, so the ones a user reaches for when naming a
+    selection are exactly the ones Molecular Nodes has already taken for the
+    structure's own per-atom data: ``res_id``, ``b_factor``, ``atomic_number``,
+    ``Color``. Writing a mask over one of those would replace the residue
+    numbering with a boolean and there is nothing to undo it with, so the
+    collision is refused and the user picks another name.
+
+    Parameters
+    ----------
+    obj : bpy.types.Object
+        The molecule object.
+    name : str
+        The attribute name a mask is about to be written under.
+
+    Returns
+    -------
+    str or None
+        A message naming what is in the way, or ``None`` when the name is free
+        or already holds a boolean point attribute — rewriting one of those is
+        how a stored selection is updated.
+    """
+    mesh_data = _mesh(obj)
+    attribute = mesh_data.attributes.get(name) if mesh_data else None
+    if attribute is None:
+        return None
+    data_type = getattr(attribute, "data_type", "")
+    domain = getattr(attribute, "domain", "")
+    if data_type == "BOOLEAN" and domain == "POINT":
+        return None
+    return (
+        f"{name!r} is already a {data_type} attribute on the {domain.lower()} "
+        f"domain of {getattr(obj, 'name', obj)!r} — storing a selection under "
+        "that name would destroy it. Choose another name."
+    )
+
+
 def write_boolean(obj: Any, name: str, mask: np.ndarray) -> None:
     """Store a boolean mask as a named point attribute.
 
@@ -133,9 +174,19 @@ def write_boolean(obj: Any, name: str, mask: np.ndarray) -> None:
     Raises
     ------
     ValueError
-        If ``mask`` is not one value per vertex.
+        If ``mask`` is not one value per vertex, or ``name`` already belongs to
+        an attribute this could not write to without destroying it — see
+        :func:`attribute_conflict`.
     """
     mask = np.asarray(mask, dtype=bool)
+
+    # Checked before the mode is looked at: the mesh carries the same
+    # attributes either way, and the Edit Mode path writes to a BMesh layer of
+    # its own, so leaving the check to that path would let the same name be
+    # refused in one mode and taken in the other.
+    conflict = attribute_conflict(obj, name)
+    if conflict is not None:
+        raise ValueError(conflict)
 
     found = _bmesh_layer(obj, name, create=True)
     if found is not None:
@@ -162,13 +213,6 @@ def write_boolean(obj: Any, name: str, mask: np.ndarray) -> None:
         )
 
     attribute = mesh_data.attributes.get(name)
-    if attribute is not None and (
-        attribute.data_type != "BOOLEAN" or attribute.domain != "POINT"
-    ):
-        # A float attribute of the same name would take the write silently and
-        # then never match anything.
-        mesh_data.attributes.remove(attribute)
-        attribute = None
     if attribute is None:
         attribute = mesh_data.attributes.new(name, "BOOLEAN", "POINT")
     attribute.data.foreach_set("value", mask)
@@ -310,7 +354,11 @@ def named_selections(target: Any, n_atoms: int | None = None) -> Mapping[str, An
     return _BooleanAttributes(obj, n_atoms) if obj is not None else {}
 
 
-_UNSAFE = re.compile(r"[^0-9A-Za-z_]+")
+#: Anything that is not a word character. ``\W`` rather than ``[^0-9A-Za-z_]``
+#: because it is Unicode-aware: a name written in Cyrillic or Chinese is made
+#: of word characters and survives, where the ASCII class dropped every letter
+#: of it and left nothing to name the selection with.
+_UNSAFE = re.compile(r"\W+")
 
 
 def safe_name(name: str) -> str:
@@ -322,7 +370,13 @@ def safe_name(name: str) -> str:
     """
     cleaned = _UNSAFE.sub("_", name.strip()).strip("_")
     if not cleaned:
-        return "selection"
+        # Nothing of what was typed is a word character. Every such name would
+        # otherwise become "selection", so storing "!!!" and then "@@@" would
+        # silently replace the first with the second; the digest keeps names
+        # that differ apart, and is itself already safe, so cleaning the result
+        # again leaves it alone.
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:8]
+        return f"selection_{digest}"
     if cleaned[0].isdigit():
         cleaned = f"sel_{cleaned}"
     return cleaned

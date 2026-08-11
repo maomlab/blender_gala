@@ -8,6 +8,7 @@ salt bridges, green for pi-stacking.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -83,6 +84,18 @@ def _style_material(kind: str, style: InteractionStyle) -> Any:
     return gala_materials.build_material(spec, name=f"GALA Interaction {kind.title()}")
 
 
+def _is_drawable(point_a: np.ndarray, point_b: np.ndarray) -> bool:
+    """Whether a line can be built between two endpoints.
+
+    Coincident endpoints have no direction to lay dashes along, and a
+    non-finite one reaches Blender as a curve of ``nan`` control points, which
+    it accepts and then draws as nothing at all.
+    """
+    if not (np.isfinite(point_a).all() and np.isfinite(point_b).all()):
+        return False
+    return float(np.linalg.norm(point_b - point_a)) > 1e-12
+
+
 def draw_interactions(
     interactions: Iterable[Interaction],
     target: Any = None,
@@ -126,6 +139,16 @@ def draw_interactions(
     -------
     list[bpy.types.Object]
         Every object created, lines and labels together.
+
+    Warns
+    -----
+    UserWarning
+        If an interaction has nowhere to draw a line — endpoints that coincide
+        or are not finite. Duplicate ATOM records and unmerged altlocs put two
+        atoms of different residues at the same coordinates, and
+        :func:`~blender_gala.interactions.detect.atom_contacts` reports the
+        pair. Those are skipped: half a figure and a traceback is worse than
+        the rest of the figure and a warning.
     """
     if scale is None:
         scale = (
@@ -140,8 +163,15 @@ def draw_interactions(
 
     created: list[Any] = []
     counters: dict[str, int] = {}
+    undrawable: list[str] = []
 
     for interaction in interactions:
+        point_a = np.asarray(interaction.point_a, dtype=float)
+        point_b = np.asarray(interaction.point_b, dtype=float)
+        if not _is_drawable(point_a, point_b):
+            undrawable.append(interaction.label or str(interaction))
+            continue
+
         style = merged.get(interaction.kind, INTERACTION_STYLES["contact"])
         index = counters.get(interaction.kind, 0)
         counters[interaction.kind] = index + 1
@@ -149,8 +179,8 @@ def draw_interactions(
 
         line = geometry.make_line(
             name,
-            interaction.point_a,
-            interaction.point_b,
+            point_a,
+            point_b,
             style=style.style,
             radius=style.radius * scale,
             dash_length=style.dash_length * scale,
@@ -174,9 +204,7 @@ def draw_interactions(
             kind=interaction.kind,
             label=interaction.label,
         )
-        midpoint = 0.5 * (
-            np.asarray(interaction.point_a) + np.asarray(interaction.point_b)
-        )
+        midpoint = 0.5 * (point_a + point_b)
         text_object = geometry.make_text(
             f"{name} label",
             text,
@@ -205,6 +233,18 @@ def draw_interactions(
             )
             if card is not None:
                 created.append(card)
+
+    if undrawable:
+        listed = ", ".join(undrawable[:3])
+        if len(undrawable) > 3:
+            listed += f", and {len(undrawable) - 3} more"
+        warnings.warn(
+            f"{len(undrawable)} interaction(s) have no line to draw — their "
+            f"endpoints coincide or are not finite — and were skipped: "
+            f"{listed}. Two atoms at identical coordinates usually means "
+            "duplicate ATOM records or unmerged altlocs.",
+            stacklevel=2,
+        )
 
     return created
 

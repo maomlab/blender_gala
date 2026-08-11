@@ -4,7 +4,8 @@ The reverse of :mod:`blender_gala.pymol.load`, and lossier in the direction
 you would expect: Blender can express things PyMOL has no word for. What
 survives is what a structural biologist would want back — the molecules where
 they are on screen, in the representations they are shown in, with their
-colours, the measurements, and the camera.
+colours, the collections they are grouped by, the measurements, and the
+camera.
 
 Coordinates are written in **world** space: an object dragged across the
 scene, or placed by :func:`~blender_gala.pymol.load.load_session` from a
@@ -68,6 +69,14 @@ REP_MAP = {
 
 #: Bond orders, from biotite's numbering to PyMOL's.
 _BOND_ORDER = {0: 1, 1: 1, 2: 2, 3: 3, 4: 1, 5: 4, 6: 4, 7: 4}
+
+#: How many points each kind of measurement is between. PyMOL's objects hold
+#: pairs, triples and quadruples and have no shape for anything else.
+_MEASURED_BETWEEN = {"distance": 2, "angle": 3, "dihedral": 4}
+
+#: The collection Molecular Nodes puts every molecule it imports into. It says
+#: where an object came from rather than what it was grouped with.
+_MN_COLLECTION = "MolecularNodes"
 
 
 @dataclass
@@ -139,7 +148,11 @@ def save_session(
     selections : sequence of str, optional
         Names of boolean mesh attributes to write as named selections.
     scale : float, optional
-        Blender units per ångström.
+        Blender units per ångström for the measurements, labels and camera.
+        Defaults to the scale the molecules being written were built at, which
+        is the scale their coordinates are read back at: a measurement written
+        against any other one is drawn across a different distance than it
+        measures.
 
     Returns
     -------
@@ -177,18 +190,23 @@ def scene_to_session(
     inspecting or editing what would be written.
     """
     _require_bpy()
-    scale = units.DEFAULT_WORLD_SCALE if scale is None else scale
 
     session = PymolSession(source=path or "Blender scene")
     result = SavedSession(path=path, session=session)
     palette = _Palette(session)
 
-    for entity in _molecules(molecules, result):
+    entities = _molecules(molecules, result)
+    scale = _scene_scale(entities) if scale is None else scale
+
+    for entity in entities:
         structure = AtomStructure.from_any(entity)
-        molecule = _build_molecule(structure, entity, palette, colors, styles, result)
+        molecule = _build_molecule(
+            structure, entity, palette, colors, styles, scale, result
+        )
         if molecule is not None:
             session.molecules.append(molecule)
             _add_selections(session, structure, entity, selections)
+            _add_group(session, entity, molecule)
 
     if labels:
         _add_labels(session, scale, result)
@@ -205,6 +223,22 @@ def scene_to_session(
 # ---------------------------------------------------------------------------
 # Molecules
 # ---------------------------------------------------------------------------
+
+
+def _scene_scale(entities: Sequence[Any]) -> float:
+    """The scale the scene is at: the one its molecules were built at.
+
+    Atom coordinates are written by dividing world positions by each
+    molecule's *own* world scale, so a default taken from anywhere else puts
+    the measurements, the labels and the camera at a scale the atoms are not
+    at — at half Molecular Nodes' scale a measurement comes out across twice
+    the separation it was drawn between.
+    """
+    for entity in entities:
+        obj = _entity_object(entity)
+        if obj is not None:
+            return units.world_scale_of(obj)
+    return units.DEFAULT_WORLD_SCALE
 
 
 def _molecules(given: Sequence[Any] | None, result: SavedSession) -> list[Any]:
@@ -251,6 +285,7 @@ def _build_molecule(
     palette: _Palette,
     colors: bool,
     styles: bool,
+    scale: float,
     result: SavedSession,
 ) -> PymolMolecule | None:
     """Turn one molecule into the PyMOL object it corresponds to."""
@@ -259,8 +294,18 @@ def _build_molecule(
     if not n_atoms:
         return None
 
-    scale = structure.world_scale
-    coord = structure.world_positions() / scale
+    own = structure.world_scale
+    if own != scale:
+        # The atoms are read back at the scale they were built at, whatever
+        # the session is being written at, so say when the two differ: the
+        # measurements beside them are at the session's scale and will no
+        # longer touch the atoms they measure.
+        result.skipped.append(
+            f"{_object_name(entity)}: its coordinates are read at the "
+            f"{own:g} Blender units per ångström it was built at, not the "
+            f"{scale:g} the rest of the session is written at"
+        )
+    coord = structure.world_positions() / own
 
     def annotation(name: str, default: Any, dtype: Any) -> np.ndarray:
         values = getattr(array, name, None)
@@ -479,24 +524,81 @@ def _measurements(scale: float, result: SavedSession) -> list[PymolMeasurement]:
         if points is None:
             continue
         kind = str(obj.get("gala_type", "")).replace("measurement_", "")
-        if kind not in ("distance", "angle", "dihedral"):
+        needed = _MEASURED_BETWEEN.get(kind)
+        if needed is None:
             continue
-        array = np.asarray(list(points), dtype=float).reshape(-1, 3) / scale
-        by_kind.setdefault(kind, []).append(array)
-
-    measurements = []
-    for kind, groups in sorted(by_kind.items()):
-        sizes = {len(g) for g in groups}
-        for size in sorted(sizes):
-            matching = [g for g in groups if len(g) == size]
-            measurements.append(
-                PymolMeasurement(
-                    name=f"gala_{kind}s" if len(sizes) == 1 else f"gala_{kind}s_{size}",
-                    kind=kind,
-                    points=np.stack(matching),
-                )
+        flat = np.asarray(list(points), dtype=float).reshape(-1)
+        if len(flat) != needed * 3:
+            # A distance between five points is not a distance PyMOL has a
+            # shape for, and the writer used to meet it as a reshape it could
+            # not do — naming no object and leaving no file. Gala can reach
+            # this itself: a session whose distance carries five points loads,
+            # and the scene it makes is then unsaveable.
+            result.skipped.append(
+                f"{obj.name} ({kind} of {len(flat)} coordinates, not the "
+                f"{needed * 3} PyMOL's is between)"
             )
-    return measurements
+            continue
+        by_kind.setdefault(kind, []).append(flat.reshape(needed, 3) / scale)
+
+    return [
+        PymolMeasurement(name=f"gala_{kind}s", kind=kind, points=np.stack(groups))
+        for kind, groups in sorted(by_kind.items())
+    ]
+
+
+def _add_group(session: PymolSession, entity: Any, molecule: PymolMolecule) -> None:
+    """Record the collection a molecule sits in as its PyMOL group.
+
+    A session loaded into Blender puts each group's molecules in a collection
+    of that name, so this is what makes the grouping survive a round trip.
+    The collections Molecular Nodes and Gala organise their own objects with
+    are not groups anybody asked for; see :func:`_is_group`.
+    """
+    obj = _entity_object(entity)
+    collection = next(
+        (c for c in getattr(obj, "users_collection", ()) if _is_group(c)), None
+    )
+    if collection is None:
+        return
+
+    molecule.group = collection.name
+    # Every collection above it is a group too, or the session names a parent
+    # it does not contain.
+    while collection is not None and collection.name not in session.groups:
+        parent = _parent_collection(collection)
+        session.groups[collection.name] = (
+            parent.name if parent is not None and _is_group(parent) else ""
+        )
+        collection = parent if parent is not None and _is_group(parent) else None
+
+
+def _is_group(collection: Any) -> bool:
+    """Whether a collection is one PyMOL should be told about.
+
+    The scene's master collection is not: it is not in ``bpy.data`` at all,
+    which is what distinguishes it. Neither are Molecular Nodes' own import
+    collection nor Gala's, which say where an object came from rather than
+    what it was grouped with — writing them would invent a ``MolecularNodes``
+    group in every session exported from Blender.
+    """
+    from ..core import collections as gala_collections
+
+    name = str(getattr(collection, "name", ""))
+    if not name or bpy.data.collections.get(name) is not collection:
+        return False
+    if name.startswith(".") or name == _MN_COLLECTION:
+        return False
+    root = gala_collections.ROOT
+    return name != root and not name.startswith(f"{root} ")
+
+
+def _parent_collection(collection: Any) -> Any:
+    """The collection this one is nested inside, if any."""
+    for candidate in bpy.data.collections:
+        if collection.name in candidate.children:
+            return candidate
+    return None
 
 
 def _add_labels(session: PymolSession, scale: float, result: SavedSession) -> None:

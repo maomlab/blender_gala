@@ -576,9 +576,14 @@ def color_from_csv(
     ------
     KeyError
         If a named column is missing from the file.
+    ValueError
+        If a cell that should hold a number does not.
     """
     values: dict[Any, float] = {}
-    with open(filepath, newline="", encoding="utf-8") as handle:
+    # utf-8-sig rather than utf-8: a spreadsheet writes a byte-order mark by
+    # default, and read as utf-8 it stays glued to the first column name, so
+    # the file reads as one whose first column is misspelt.
+    with open(filepath, newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         missing = [
             column
@@ -593,10 +598,33 @@ def color_from_csv(
             raw = row[value_column]
             if raw is None or raw.strip() == "":
                 continue
-            res_id = int(float(row[res_id_column]))
+            where = f"{filepath} line {reader.line_num}"
+            res_id = _csv_number(row[res_id_column], res_id_column, where)
+            if not np.isfinite(res_id):
+                raise ValueError(
+                    f"{where}: {res_id_column} is {row[res_id_column]!r}, which "
+                    "is not a residue number"
+                )
             key: Any = (
-                (row[chain_column].strip().upper(), res_id) if chain_column else res_id
+                (row[chain_column].strip().upper(), int(res_id))
+                if chain_column
+                else int(res_id)
             )
-            values[key] = float(raw)
+            values[key] = _csv_number(raw, value_column, where)
 
     return color_by_attribute(target, values, **kwargs)
+
+
+def _csv_number(text: Any, column: str, where: str) -> float:
+    """Read one cell as a number, saying which cell it was if it is not one.
+
+    ``float()`` on its own reports the offending text and nothing else, which
+    in a file of several thousand rows is not enough to find it by.
+    """
+    try:
+        return float(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{where}: {column} is {text!r}, which is not a number. A decimal "
+            "comma or a unit written into the cell is the usual cause."
+        ) from exc

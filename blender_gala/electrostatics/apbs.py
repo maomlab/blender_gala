@@ -32,6 +32,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import warnings
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,6 +55,32 @@ _ENV_VARS = {"apbs": "GALA_APBS", "pdb2pqr": "GALA_PDB2PQR"}
 
 #: Other names the same program goes by.
 _ALIASES = {"pdb2pqr": ("pdb2pqr", "pdb2pqr30", "pdb2pqr.exe")}
+
+#: Fields in the shortest PQR atom line: record name, serial, atom name,
+#: residue name, residue number, x, y, z, charge, radius. A chain identifier
+#: makes eleven.
+_PQR_MINIMUM_FIELDS = 10
+
+#: What the PDB format's numbering columns hold: five digits of atom serial,
+#: four of residue number. Past them biotite wraps the number back to zero and
+#: says so in a ``UserWarning`` — which goes to a console nobody is watching,
+#: while the file it wrote describes a different molecule.
+_PDB_MAX_ATOM_ID = 99_999
+_PDB_MAX_RES_ID = 9_999
+
+#: What the same two columns hold in hybrid-36, the PDB's own extension for
+#: exactly this: decimal until the field is full, then base 36 with a letter in
+#: the leading column. biotite writes it and reads it back, so it is lossless
+#: here; whether the *next* program in a pipeline reads it is a separate
+#: question, and PDB2PQR does not.
+_HYBRID36_MAX_ATOM_ID = 87_440_031
+_HYBRID36_MAX_RES_ID = 2_436_111
+
+#: Seconds. How long APBS or PDB2PQR may run before Gala stops waiting.
+#: Generous, because a large solute genuinely takes many minutes; it is there
+#: for the run that has hung, which would otherwise hold Blender's main thread
+#: forever with no way to cancel it.
+DEFAULT_TIMEOUT = 3600.0
 
 
 class ApbsUnavailable(GalaError):
@@ -136,7 +164,14 @@ def find_executable(program: str, override: str | None = None) -> str:
     for candidate in candidates:
         if not candidate:
             continue
-        if os.path.isabs(candidate) and os.access(candidate, os.X_OK):
+        # `os.access(..., X_OK)` is true of a directory, and a directory that
+        # happens to be called `apbs` would then be handed to subprocess and
+        # come back as a bare PermissionError from three modules down.
+        if (
+            os.path.isabs(candidate)
+            and os.path.isfile(candidate)
+            and os.access(candidate, os.X_OK)
+        ):
             return candidate
         found = shutil.which(candidate)
         if found:
@@ -161,25 +196,127 @@ def _environment(executable: str) -> dict[str, str]:
     return env
 
 
-def _run(command: list[str], workdir: str, log: str) -> subprocess.CompletedProcess:
-    """Run a command in ``workdir``, keeping its output next to its results."""
-    result = subprocess.run(
-        command,
-        cwd=workdir,
-        env=_environment(command[0]),
-        capture_output=True,
-        text=True,
-    )
-    with open(os.path.join(workdir, log), "w") as handle:
-        handle.write(result.stdout)
-        handle.write(result.stderr)
+def _run(
+    command: list[str],
+    workdir: str,
+    log: str,
+    timeout: float | None = DEFAULT_TIMEOUT,
+) -> subprocess.CompletedProcess:
+    """Run a command in ``workdir``, keeping its output next to its results.
+
+    Output is written straight to the log file rather than through a pipe:
+    both programs are chatty, and one that decides to write hundreds of
+    megabytes would otherwise be held in memory in full — and written to disk
+    in full afterwards — before anything could look at it. Only the tail is
+    read back, and only when the run failed.
+    """
+    path = os.path.join(workdir, log)
+    with open(path, "w") as handle:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=workdir,
+                env=_environment(command[0]),
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GalaError(
+                f"{os.path.basename(command[0])} did not finish within "
+                f"{timeout:g} s and was stopped; Blender would otherwise wait "
+                f"on it forever. What it wrote before then is in {path}. Pass "
+                "a larger timeout= to run_apbs if the solute really is that big."
+            ) from exc
+        except OSError as exc:
+            raise GalaError(f"{command[0]} could not be run: {exc}") from exc
+
     if result.returncode != 0:
-        tail = "\n".join((result.stdout + result.stderr).splitlines()[-15:])
+        with open(path) as handle:
+            tail = "".join(deque(handle, maxlen=15)).rstrip()
         raise GalaError(
             f"{os.path.basename(command[0])} failed (exit {result.returncode}). "
-            f"Full output in {os.path.join(workdir, log)}:\n{tail}"
+            f"Full output in {path}:\n{tail}"
         )
     return result
+
+
+def _numbering(array: Any) -> tuple[np.ndarray, np.ndarray]:
+    """The atom serials and residue numbers a write would put in the file.
+
+    biotite numbers the atoms ``1..n`` when the array carries no ``atom_id``,
+    so the limit for one of those is the atom count.
+    """
+    serials = getattr(array, "atom_id", None)
+    if serials is None:
+        serials = np.arange(1, len(array) + 1)
+    res_id = getattr(array, "res_id", None)
+    if res_id is None:
+        res_id = np.ones(len(array), dtype=int)
+    return np.asarray(serials), np.asarray(res_id)
+
+
+def _beyond_pdb_numbering(array: Any) -> str:
+    """Describe how ``array`` overflows the PDB's numbering columns, or ``""``.
+
+    Returns
+    -------
+    str
+        A phrase naming each field that does not fit and the value that does
+        not fit in it, ready to open a sentence. Empty when the plain format
+        holds the whole structure, which it does for all but the largest.
+    """
+    serials, res_id = _numbering(array)
+    over = []
+    if serials.size and int(serials.max()) > _PDB_MAX_ATOM_ID:
+        over.append(
+            f"atom serial {int(serials.max()):,} does not fit the PDB format's "
+            f"five-digit field, which stops at {_PDB_MAX_ATOM_ID:,}"
+        )
+    if res_id.size and int(res_id.max()) > _PDB_MAX_RES_ID:
+        over.append(
+            f"residue number {int(res_id.max()):,} does not fit the PDB "
+            f"format's four-digit field, which stops at {_PDB_MAX_RES_ID:,}"
+        )
+    return ", and ".join(over)
+
+
+def _needs_hybrid36(array: Any) -> bool:
+    """Whether writing ``array`` losslessly needs hybrid-36 numbering.
+
+    Raises
+    ------
+    GalaError
+        If the numbering fits neither notation — it runs past hybrid-36 as
+        well, or it includes a number below one, which hybrid-36 cannot
+        encode at all.
+    """
+    overflow = _beyond_pdb_numbering(array)
+    if not overflow:
+        return False
+
+    serials, res_id = _numbering(array)
+    smallest = min(int(serials.min()), int(res_id.min()))
+    if smallest < 1:
+        raise GalaError(
+            f"this structure cannot be written as PDB: {overflow}, and the "
+            f"hybrid-36 notation that would carry it cannot encode {smallest}, "
+            "since it has no digits left for a sign. Renumber the atoms and "
+            "residues from 1, or write out a subset."
+        )
+    if (
+        int(serials.max()) > _HYBRID36_MAX_ATOM_ID
+        or int(res_id.max()) > _HYBRID36_MAX_RES_ID
+    ):
+        raise GalaError(
+            f"this structure cannot be written as PDB: {overflow}, and it runs "
+            f"past hybrid-36 numbering too ({_HYBRID36_MAX_ATOM_ID:,} atoms, "
+            f"{_HYBRID36_MAX_RES_ID:,} residues). Write it as mmCIF, or write "
+            "out a subset."
+        )
+    return True
 
 
 def write_pdb(target: Any, path: str) -> str:
@@ -187,6 +324,17 @@ def write_pdb(target: Any, path: str) -> str:
 
     Waters and other solvent are kept: PDB2PQR is told to drop them, and it
     knows better than a selection string here would.
+
+    Numbering past what the format's columns hold — more than 99,999 atoms or
+    a residue numbered past 9,999 — is written in hybrid-36, the PDB's own
+    extension for it, which biotite reads back exactly. The alternative
+    biotite offers is to *wrap* the number and warn, which produces a file
+    describing a molecule with twelve atoms per residue and no way for a
+    reader to tell. A structure neither notation can hold is refused.
+
+    Note that hybrid-36 is not universally read — :func:`run_apbs` refuses a
+    structure that would need it, because PDB2PQR is one of the programs that
+    does not.
 
     Parameters
     ----------
@@ -199,34 +347,116 @@ def write_pdb(target: Any, path: str) -> str:
     -------
     str
         The path written.
+
+    Raises
+    ------
+    GalaError
+        If the structure cannot be represented in the PDB format: a chain
+        identifier of more than one character, a coordinate needing more than
+        four digits before the decimal point, or numbering beyond hybrid-36.
     """
     if isinstance(target, str):
         return target
 
+    from biotite.structure import BadStructureError
     from biotite.structure.io.pdb import PDBFile
 
     from ..core.entity import AtomStructure
 
     structure = AtomStructure.from_any(target)
+    hybrid36 = _needs_hybrid36(structure.array)
+
     pdb = PDBFile()
-    pdb.set_structure(structure.array)
+    try:
+        with warnings.catch_warnings(record=True) as raised:
+            warnings.simplefilter("always")
+            pdb.set_structure(structure.array, hybrid36=hybrid36)
+    except BadStructureError as exc:
+        # Multi-character chain identifiers (ordinary in an mmCIF
+        # `auth_asym_id`) and assembly frames far from the origin both land
+        # here, and biotite's exception is not a GalaError — so without this
+        # it reaches the user as a console traceback rather than a report.
+        raise GalaError(
+            f"this structure cannot be written as PDB: {exc}. mmCIF carries "
+            "what the PDB format's fixed columns cannot; a structure that "
+            "needs it has to be renamed, moved to the origin, or subset "
+            "before APBS can be run on it."
+        ) from exc
+
+    # A number that will not fit is a warning in biotite and a wrapped value in
+    # the file, which is the one outcome this function must never produce. The
+    # width check above should have caught it; this is the check that the
+    # widths are still the ones biotite is using.
+    for warning in raised:
+        if "wrapped" in str(warning.message):
+            raise GalaError(
+                f"this structure cannot be written as PDB: {warning.message}. "
+                "A wrapped number would describe a different molecule."
+            )
+        warnings.warn_explicit(
+            warning.message, warning.category, warning.filename, warning.lineno
+        )
+
     pdb.write(path)
     return path
 
 
+def _require_plain_pdb_numbering(target: Any) -> None:
+    """Refuse a structure PDB2PQR cannot be handed as a PDB file.
+
+    PDB2PQR reads the numbering columns as plain integers, so the hybrid-36
+    notation :func:`write_pdb` falls back to is not an answer here — and
+    neither is letting biotite wrap the numbers, which is what produced this
+    check: a 126,000-atom array wrote 63,000 residues as 9,999 distinct
+    numbers, PDB2PQR read about twelve atoms per residue, and APBS returned a
+    potential map for a chemically impossible molecule without complaint.
+
+    A path is not inspected: it is whatever file the caller already has.
+    """
+    if isinstance(target, str):
+        return
+
+    from ..core.entity import AtomStructure
+
+    overflow = _beyond_pdb_numbering(AtomStructure.from_any(target).array)
+    if overflow:
+        raise GalaError(
+            f"this structure is too large to solve through PDB2PQR: {overflow}. "
+            "PDB2PQR reads the PDB format, and a structure past those fields "
+            "can only be written by wrapping the numbers — which silently "
+            "renumbers the molecule — or in hybrid-36, which PDB2PQR does not "
+            "read. Run APBS on a subset: the chain, or the site being "
+            "rendered, is what a figure needs and is what the solver can hold."
+        )
+
+
 def _net_charge(pqr_path: str) -> float:
-    """Sum the charge column of a PQR file."""
+    """Sum the charge column of a PQR file.
+
+    A PQR line is a PDB line with charge and radius in place of occupancy and
+    B-factor, written whitespace-separated rather than column-aligned: record
+    name, serial, atom name, residue name, an optional chain, residue number,
+    *x*, *y*, *z*, charge, radius. Only a line carrying all of that, whose
+    last five fields all read as numbers, is an atom — anything shorter is
+    something else that happens to begin with ``ATOM`` and has no charge to
+    add. A charge that is not finite is not a charge either: a ``nan`` here
+    would become the net charge, which is the one number that says whether
+    PDB2PQR protonated the structure sensibly.
+    """
     total = 0.0
     with open(pqr_path) as handle:
         for line in handle:
-            if line.startswith(("ATOM", "HETATM")):
-                fields = line.split()
-                if len(fields) >= 2:
-                    # A PQR line is a PDB line with charge and radius in place
-                    # of occupancy and B-factor; anything else in the file is
-                    # not an atom and has no charge to add.
-                    with contextlib.suppress(ValueError):
-                        total += float(fields[-2])
+            if not line.startswith(("ATOM", "HETATM")):
+                continue
+            fields = line.split()
+            if len(fields) < _PQR_MINIMUM_FIELDS:
+                continue
+            with contextlib.suppress(ValueError):
+                # x, y, z, charge, radius: the coordinates are read only to
+                # confirm the line really has the layout it is being read as.
+                numbers = [float(value) for value in fields[-5:]]
+                if np.isfinite(numbers).all():
+                    total += numbers[3]
     return total
 
 
@@ -290,6 +520,7 @@ def run_apbs(
     drop_water: bool = True,
     apbs_path: str | None = None,
     pdb2pqr_path: str | None = None,
+    timeout: float | None = DEFAULT_TIMEOUT,
 ) -> ApbsResult:
     """Solve the Poisson-Boltzmann equation for a structure.
 
@@ -322,6 +553,10 @@ def run_apbs(
         crystallographic waters are not part of the continuum solvent model.
     apbs_path, pdb2pqr_path : str, optional
         Explicit executables, overriding ``PATH`` and the environment.
+    timeout : float, optional
+        Seconds either program may run for before it is stopped. ``None``
+        waits indefinitely, which from inside Blender means a hung solver
+        holds the whole interface with nothing to press.
 
     Returns
     -------
@@ -332,12 +567,20 @@ def run_apbs(
     ApbsUnavailable
         If either program is missing.
     GalaError
-        If either program fails, or writes nothing to read.
+        If either program fails, times out, or writes nothing to read; or if
+        the structure has more atoms or residues than the PDB format PDB2PQR
+        reads can number, since the only ways to write it are a wrapped —
+        silently renumbered — file and one PDB2PQR cannot parse.
     ValueError
         If ``solver`` is not one of the two.
     """
     if solver not in ("lpbe", "npbe"):
         raise ValueError(f"solver must be 'lpbe' or 'npbe', got {solver!r}")
+
+    # Before looking for the programs: a structure the pipeline cannot carry is
+    # a fact about the argument, and saying so is more use than reporting that
+    # APBS is missing to someone whose structure could not have been solved.
+    _require_plain_pdb_numbering(target)
 
     pdb2pqr = find_executable("pdb2pqr", pdb2pqr_path)
     apbs = find_executable("apbs", apbs_path)
@@ -355,7 +598,7 @@ def run_apbs(
     if drop_water:
         command.append("--drop-water")
     command += [os.path.abspath(pdb_path), pqr_path]
-    _run(command, workdir, "pdb2pqr.log")
+    _run(command, workdir, "pdb2pqr.log", timeout=timeout)
 
     if not os.path.exists(pqr_path):  # pragma: no cover - defensive
         raise GalaError(f"PDB2PQR wrote no PQR file; see {workdir}/pdb2pqr.log")
@@ -375,7 +618,7 @@ def run_apbs(
     with open(input_path, "w") as handle:
         handle.write(text)
 
-    _run([apbs, os.path.basename(input_path)], workdir, "apbs.log")
+    _run([apbs, os.path.basename(input_path)], workdir, "apbs.log", timeout=timeout)
 
     dx_path = _dx_path(text, workdir)
     if not os.path.exists(dx_path):  # pragma: no cover - defensive

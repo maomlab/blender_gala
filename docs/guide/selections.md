@@ -29,7 +29,13 @@ molecule.
 | `charge` | | Partial charge | `charge < -0.5` |
 | `ss` | | Secondary structure code | `ss 1` |
 
-Names are matched case-insensitively, so `chain a` and `chain A` agree.
+Names are matched case-insensitively, so `resn ala` and `resn ALA` agree.
+
+Chain identifiers are the exception, because mmCIF treats them as
+case-sensitive and a large assembly uses both cases to get past the 62
+single-character names. A chain is matched exactly first, and only falls back
+to ignoring case when nothing matched — so `chain a` finds chain `A` in a file
+that has no chain `a`, and finds only chain `a` in one that has both.
 
 ### Value forms
 
@@ -62,7 +68,9 @@ Names are matched case-insensitively, so `chain a` and `chain A` agree.
 | --- | --- | --- |
 | `all` / `none` | | Everything / nothing |
 | `protein` | `peptide` | Amino acid residues, including modified ones |
-| `nucleic` | `dna`, `rna` | Nucleotides |
+| `nucleic` | | Nucleotides, of either kind |
+| `dna` | | Deoxyribonucleotides — `DA`, `DC`, `DG`, `DT`, `DU` and `T` |
+| `rna` | | Ribonucleotides — `A`, `C`, `G`, `U` and the `R`-prefixed forms |
 | `polymer` | | Protein or nucleic |
 | `backbone` | `bb` | Protein N/CA/C/O, nucleic phosphate backbone |
 | `sidechain` | `sc` | Polymer, not backbone, not hydrogen |

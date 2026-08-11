@@ -291,7 +291,13 @@ class PymolView:
     @classmethod
     def from_list(cls, values: Any) -> PymolView:
         """Build from the 25 floats a session stores."""
-        numbers = [float(v) for v in values]
+        try:
+            numbers = [float(v) for v in values]
+        except (TypeError, ValueError) as exc:
+            raise PymolSessionError(
+                f"the session's view is not a list of numbers ({exc}); the file "
+                "is corrupt"
+            ) from exc
         if len(numbers) < 25:
             raise PymolSessionError(f"view has {len(numbers)} numbers, expected 25")
         matrix = np.array(numbers[:16], dtype=float).reshape(4, 4)
@@ -606,16 +612,19 @@ def read_session(path: str) -> PymolSession:
     Raises
     ------
     PymolSessionError
-        If the file is not a session, refers to globals Gala will not import,
-        or was written with ``pse_binary_dump`` on, which stores raw C structs
-        this reader deliberately does not attempt to decode.
+        If the file is not a session, is corrupt or truncated, refers to
+        globals Gala will not import, or was written with ``pse_binary_dump``
+        on, which stores raw C structs this reader deliberately does not
+        attempt to decode.
     """
     with open(path, "rb") as handle:
         raw = handle.read()
-    if raw[:2] == b"\x1f\x8b":
-        raw = gzip.decompress(raw)
 
     try:
+        # Inside the guard, because a truncated download is gzip's failure as
+        # often as it is the pickler's and neither is the user's business.
+        if raw[:2] == b"\x1f\x8b":
+            raw = gzip.decompress(raw)
         # latin1 so that sessions written by PyMOL 1.7's Python 2 pickler,
         # whose strings are bytes, decode rather than raise.
         data = _Unpickler(io.BytesIO(raw), encoding="latin1").load()
@@ -640,8 +649,25 @@ def read_session(path: str) -> PymolSession:
     if data.get("view"):
         session.view = PymolView.from_list(data["view"])
 
-    for record in data["names"]:
-        if not record or len(record) <= _REC_DATA:
+    names = data["names"]
+    if not isinstance(names, (list, tuple)):
+        raise PymolSessionError(
+            f"{path}: the session's object list is a {type(names).__name__}, "
+            "not a list of objects; the file is corrupt"
+        )
+    for record in names:
+        # PyMOL's own list starts with a None, and a short record is one of the
+        # kinds this reader has nothing to do with; anything that is not a list
+        # at all is damage, and saying so beats a TypeError from len().
+        if record is None:
+            continue
+        if not isinstance(record, (list, tuple)):
+            raise PymolSessionError(
+                f"{path}: an entry in the session's object list is a "
+                f"{type(record).__name__}, not an object record; the file is "
+                "corrupt"
+            )
+        if len(record) <= _REC_DATA:
             continue
         _read_record(session, record)
 

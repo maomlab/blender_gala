@@ -296,13 +296,22 @@ def frame_target(
     Raises
     ------
     ValueError
-        If ``viewpoint`` is neither a known name nor a pair of angles.
+        If ``viewpoint`` is neither a known name nor a pair of angles, or if
+        ``margin`` is not positive.
     EmptySelectionError
         If ``selection`` matches no atoms.
+    GalaError
+        If the subject has non-finite coordinates.
     """
     bpy_mod = _require_bpy()
     scene = scene or bpy_mod.context.scene
     camera = camera or ensure_camera(scene)
+
+    # The fit divides by the margin, so zero puts the camera at the aim point —
+    # inside the molecule — and a negative one turns the fit inside out, where
+    # asking for more room gives less of it.
+    if not margin > 0:
+        raise ValueError(f"margin must be positive, got {margin}")
 
     if isinstance(viewpoint, str):
         if viewpoint not in VIEWPOINTS:
@@ -381,6 +390,31 @@ def _target_bounds(target: Any, scene: Any) -> tuple[np.ndarray, float]:
     return _subject_bounds(target, scene)
 
 
+def _placed(points: np.ndarray) -> np.ndarray:
+    """Return the points that are real positions, refusing if none are.
+
+    A single ``nan`` makes the min and max of the whole set ``nan``, which
+    becomes a camera transform of ``nan`` and a render that is black for no
+    stated reason; ``inf`` arrives at the same place, since ``inf - inf`` is
+    ``nan``. Dropping those points rather than refusing them is what the
+    selection language and :meth:`AtomStructure.bounding_sphere` already do
+    with a missing coordinate, and for the same reason: a structure read from
+    one state of a multi-state session carries ``nan`` for the atoms that
+    state does not contain, and framing the atoms it *does* contain is the
+    useful answer.
+    """
+    finite = points[np.isfinite(points).all(axis=1)]
+    if len(finite) == 0:
+        from ..core.exceptions import GalaError
+
+        raise GalaError(
+            f"none of the {len(points)} points to frame has a finite position, "
+            "so there is no extent to fit. Check the structure for nan or "
+            "infinite atom coordinates."
+        )
+    return finite
+
+
 def _subject_points(
     target: Any, scene: Any, selection: str | None = None
 ) -> np.ndarray | None:
@@ -389,6 +423,11 @@ def _subject_points(
     Atom positions when the target is a molecule; the vertices of every
     visible mesh when there is no target, which is what makes framing a scene
     of several molecules as tight as framing one.
+
+    Raises
+    ------
+    GalaError
+        If any point is not finite. See :func:`_placed`.
     """
     from ..core.entity import AtomStructure
     from ..core.exceptions import EmptySelectionError
@@ -401,13 +440,13 @@ def _subject_points(
         if structure is not None and structure.n_atoms and structure.object is not None:
             positions = structure.world_positions()
             if selection is None:
-                return positions
+                return _placed(positions)
             mask = structure.select(selection)
             if not mask.any():
                 raise EmptySelectionError(
                     f"cannot frame {selection!r}: it matches no atoms"
                 )
-            return positions[mask]
+            return _placed(positions[mask])
 
     if selection is not None:
         raise TypeError("framing a selection needs a molecule to select from")
@@ -431,7 +470,7 @@ def _subject_points(
         for points in (_object_points(obj) for obj in objects)
         if points is not None and len(points)
     ]
-    return np.vstack(gathered) if gathered else None
+    return _placed(np.vstack(gathered)) if gathered else None
 
 
 #: Vertices above this and an object is sampled rather than read whole. Framing
@@ -608,9 +647,21 @@ def orbit(
     -------
     bpy.types.Object
         The pivot empty, keyframed over ``frames``.
+
+    Raises
+    ------
+    ValueError
+        If ``frames`` is not positive.
     """
     bpy_mod = _require_bpy()
     scene = scene or bpy_mod.context.scene
+
+    # Before anything is created: an orbit of no frames puts both keyframes on
+    # the same frame and collapses the scene range to 0..0, which looks like a
+    # scene that was never set up rather than an argument that was refused.
+    if frames < 1:
+        raise ValueError(f"frames must be positive, got {frames}")
+
     camera = camera or ensure_camera(scene)
 
     centre, _ = _target_bounds(target, scene)
@@ -623,6 +674,14 @@ def orbit(
 
     pivot.location = tuple(float(v) for v in centre)
     pivot.rotation_euler = (0.0, 0.0, 0.0)
+
+    # `matrix_world` is a depsgraph result, not a property of the assignment
+    # above: read without flushing it, the pivot is still at the world origin
+    # and the parent inverse comes back as the identity, which displaces the
+    # camera by the whole target centre. The displacement then appears at
+    # whatever the *next* update happens to be, long after this call.
+    scene.view_layers[0].update()
+
     camera.parent = pivot
     camera.matrix_parent_inverse = pivot.matrix_world.inverted()
 

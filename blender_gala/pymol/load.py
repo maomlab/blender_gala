@@ -188,7 +188,13 @@ def load_session(
     hdri : str, optional
         Which HDRI the ``hdri`` and ``both`` styles use.
     scale : float, optional
-        Blender units per ångström. Defaults to Molecular Nodes' 0.01.
+        Blender units per ångström, for a session with no molecule to take the
+        scale from. Molecular Nodes builds a molecule at its own world scale
+        and its styles are drawn at that scale whatever the mesh is at, so
+        when there are molecules they decide: the measurements, the labels and
+        the camera are put at the scale the atoms were built at, and a request
+        for another one is reported in :attr:`LoadedSession.skipped` rather
+        than applied to half the scene.
 
     Returns
     -------
@@ -212,31 +218,37 @@ def load_session(
     mn = mn_bridge.require_mn()
 
     session = path if isinstance(path, PymolSession) else read_session(path)
-    scale = units.DEFAULT_WORLD_SCALE if scale is None else scale
+    requested = units.DEFAULT_WORLD_SCALE if scale is None else scale
     result = LoadedSession(session=session)
 
     for name, kind in session.unsupported:
         result.skipped.append(f"{name} ({kind})")
 
-    kept_atoms: dict[str, np.ndarray] = {}
+    built: list[tuple[PymolMolecule, Any, np.ndarray]] = []
     for molecule in session.molecules:
-        built = _build_molecule(mn, molecule, state, result)
-        if built is None:
+        made = _build_molecule(mn, molecule, state, result)
+        if made is None:
             continue
-        entity, kept = built
-        result.molecules[molecule.name] = entity
-        kept_atoms[molecule.name] = kept
+        entity, kept = made
+        built.append((molecule, entity, kept))
+        result.molecules[_reported_as(result, molecule.name, entity)] = entity
 
         if colors:
             _apply_colors(session, molecule, entity, kept)
         if selections:
-            _apply_selections(session, molecule, entity, kept)
+            _apply_selections(session, molecule, entity, kept, result)
         if styles:
             _apply_styles(mn, molecule, entity, kept, result)
         if molecule.matrix is not None:
-            _apply_transform(module, entity, molecule.matrix, scale)
+            # The translation is in ångström, so it is scaled by what this
+            # molecule was built at rather than by what was asked for.
+            _apply_transform(module, entity, molecule.matrix, _scale_of(entity))
         entity.object.hide_render = not molecule.visible
         entity.object.hide_viewport = not molecule.visible
+
+    # Everything below is drawn beside the molecules, so it is drawn at their
+    # scale; see `_drawn_scale`.
+    scale = _drawn_scale(built, requested, result)
 
     if materials is not None:
         _assign_materials(result, materials)
@@ -244,15 +256,68 @@ def load_session(
         _build_lighting(result, lighting, light_energy, hdri)
 
     if groups:
-        _apply_groups(module, session, result)
+        _apply_groups(module, session, built, result)
     if camera:
         result.camera = view_to_camera(session.view, scale=scale)
     if measurements:
         _draw_measurements(session, result, scale)
     if labels:
-        _draw_labels(session, result, kept_atoms, scale)
+        _draw_labels(built, result, scale)
 
     return result
+
+
+def _scale_of(entity: Any) -> float:
+    """Blender units per ångström for a molecule Molecular Nodes built."""
+    return units.world_scale_of(entity.object)
+
+
+def _drawn_scale(
+    built: list[tuple[PymolMolecule, Any, np.ndarray]],
+    requested: float,
+    result: LoadedSession,
+) -> float:
+    """The scale everything drawn beside the molecules has to use.
+
+    Molecular Nodes imports at its own world scale and has no argument for
+    another one, and its styles bake that scale in besides — a stick radius is
+    in ångström whatever the mesh is at — so a molecule built at half MN's
+    scale would carry a cartoon twice as thick as it should be. What can be
+    kept is the invariant that matters: a measurement, a label and the camera
+    are at the same scale as the atoms they are about. The atoms therefore
+    decide, and a request they disagree with is reported rather than applied
+    to half the scene. With no molecule to take a scale from, the request
+    stands: there is nothing for it to disagree with.
+    """
+    if not built:
+        return requested
+    _, first, _ = built[0]
+    scale = _scale_of(first)
+    if scale != requested:
+        result.skipped.append(
+            f"scale {requested:g} (Molecular Nodes built the molecules at "
+            f"{scale:g} Blender units per ångström, and the rest of the scene "
+            "is drawn at the scale the atoms are)"
+        )
+    return scale
+
+
+def _reported_as(result: LoadedSession, name: str, entity: Any) -> str:
+    """The name one molecule is reported under in :attr:`molecules`.
+
+    PyMOL object names are unique within a session, but a file that says
+    otherwise used to lose the first of two: it stayed in the scene with no
+    material and outside its own group, while the name pointed at the second.
+    The second is reported under the name Blender gave its object — unique by
+    construction — so that both are in the result and both are looked after.
+    """
+    if name not in result.molecules:
+        return name
+    reported = str(entity.object.name)
+    result.skipped.append(
+        f"{name} (two objects of that name; the second is reported as {reported})"
+    )
+    return reported
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +338,11 @@ def _build_molecule(
     it is silently the wrong length and does nothing at all.
     """
     try:
-        array = molecule.to_atom_array(state if molecule.n_states > 1 else 0)
+        # Range-checked for every object, single-state ones included: a
+        # mistyped state used to be reported for the multi-state objects of a
+        # session and read as state 0 for the rest, which is the one reading
+        # that cannot be told from a correct answer.
+        array = molecule.to_atom_array(state)
     except Exception as exc:
         result.skipped.append(f"{molecule.name} ({exc})")
         return None
@@ -292,12 +361,17 @@ def _build_molecule(
             f"no coordinates for in state {state}"
         )
 
+    # Why each interchange format was not the one, so that a molecule which
+    # arrives in none of them says which half of the trip failed: writing the
+    # file, or Molecular Nodes reading it back.
+    reasons: list[str] = []
     with tempfile.TemporaryDirectory() as workdir:
         for suffix, writer in ((".cif", _write_cif), (".pdb", _write_pdb)):
             target = os.path.join(workdir, _safe_name(molecule.name) + suffix)
             try:
                 writer(array, target)
-            except Exception:  # pragma: no cover - depends on biotite build
+            except Exception as exc:  # pragma: no cover - depends on biotite
+                reasons.append(f"no {suffix.lstrip('.')} could be written ({exc})")
                 continue
             try:
                 with warnings.catch_warnings():
@@ -313,7 +387,9 @@ def _build_molecule(
                     entity = mn.Molecule.load(
                         target, name=molecule.name, remove_solvent=False
                     )
-            except Exception:  # pragma: no cover - depends on MN
+            except Exception as exc:  # pragma: no cover - depends on MN
+                kind = suffix.lstrip(".")
+                reasons.append(f"Molecular Nodes could not import the {kind} ({exc})")
                 continue
             if _atom_count(entity) == len(array):
                 _restore_annotations(entity, array)
@@ -325,7 +401,7 @@ def _build_molecule(
             )
             return entity, np.zeros(molecule.n_atoms, dtype=bool)
 
-    result.skipped.append(f"{molecule.name} (could not be written for import)")
+    result.skipped.append(f"{molecule.name} ({'; '.join(reasons)})")
     return None
 
 
@@ -428,9 +504,16 @@ def _write_pdb(array: Any, path: str) -> None:
     handle.write(path)
 
 
+#: How much of an object's name a temporary file may carry. PyMOL puts no
+#: limit on an object name and the filesystem does, so a long one used
+#: verbatim is an ``OSError`` rather than a molecule. The file exists for one
+#: import out of one directory, so the name only has to be readable.
+_NAME_LIMIT = 64
+
+
 def _safe_name(name: str) -> str:
     keep = [c if c.isalnum() or c in "-_" else "_" for c in name]
-    return "".join(keep) or "object"
+    return "".join(keep)[:_NAME_LIMIT] or "object"
 
 
 def _apply_colors(
@@ -451,7 +534,11 @@ def _apply_colors(
 
 
 def _apply_selections(
-    session: PymolSession, molecule: PymolMolecule, entity: Any, kept: np.ndarray
+    session: PymolSession,
+    molecule: PymolMolecule,
+    entity: Any,
+    kept: np.ndarray,
+    result: LoadedSession,
 ) -> None:
     """Store each named selection as a boolean attribute.
 
@@ -467,7 +554,56 @@ def _apply_selections(
         mask = full[kept]
         if len(mask) != _atom_count(entity):
             continue
-        _store_mask(entity, _attribute_name(selection.name), mask)
+        _store_selection(entity, selection.name, mask, molecule.name, result)
+
+
+def _store_selection(
+    entity: Any, name: str, mask: np.ndarray, owner: str, result: LoadedSession
+) -> None:
+    """Store one selection as a boolean attribute, out of Blender's way.
+
+    A PyMOL selection can be called anything, and some of those names a mesh
+    already has: ``position`` is a vector, ``sharp_face`` lives on the faces.
+    Writing a per-atom boolean over one of those is refused from inside
+    databpy, which used to abort the whole load — and a name Molecular Nodes
+    owns, ``res_id`` or ``b_factor``, would have been overwritten instead,
+    losing the numbering the rest of the add-on selects on. Either way the
+    selection is stored under a ``pymol_`` prefix and the rename is said out
+    loud, because a node tree that reads the attribute has to be told.
+    """
+    attribute = _attribute_name(name)
+    if _is_taken(entity, attribute):
+        prefixed = f"pymol_{attribute}"
+        if _is_taken(entity, prefixed):  # pragma: no cover - needs both names
+            result.skipped.append(
+                f"{owner}: selection {name!r} (neither {attribute} nor "
+                f"{prefixed} is free on the mesh)"
+            )
+            return
+        result.skipped.append(
+            f"{owner}: selection {name!r} under its own name ({attribute} is a "
+            f"mesh attribute already; stored as {prefixed})"
+        )
+        attribute = prefixed
+    try:
+        _store_mask(entity, attribute, mask)
+    except Exception as exc:  # pragma: no cover - depends on databpy
+        result.skipped.append(f"{owner}: selection {name!r} ({exc})")
+
+
+def _is_taken(entity: Any, name: str) -> bool:
+    """Whether the mesh already carries ``name`` as something other than a mask.
+
+    A per-atom boolean can replace a per-atom boolean, which is what storing
+    the same selection twice does. Anything else — another domain, another
+    type — is data that belongs to Blender or to Molecular Nodes.
+    """
+    mesh = getattr(entity.object, "data", None)
+    attributes = getattr(mesh, "attributes", None)
+    attribute = attributes.get(name) if attributes is not None else None
+    if attribute is None:
+        return False
+    return attribute.domain != "POINT" or attribute.data_type != "BOOLEAN"
 
 
 def _apply_styles(
@@ -562,30 +698,67 @@ def _apply_transform(
     )
 
 
-def _apply_groups(module: Any, session: PymolSession, result: LoadedSession) -> None:
-    """Recreate PyMOL groups as collections."""
-    wanted = {
-        molecule.group
-        for molecule in session.molecules
-        if molecule.group and molecule.name in result.molecules
-    }
-    for name in sorted(wanted | set(session.groups)):
-        if not name:
-            continue
+def _apply_groups(
+    module: Any,
+    session: PymolSession,
+    built: list[tuple[PymolMolecule, Any, np.ndarray]],
+    result: LoadedSession,
+) -> None:
+    """Recreate PyMOL groups as collections, nested the way the session had them.
+
+    ``session.groups`` maps each group to the group it is inside, which is a
+    collection inside a collection; linking every one of them straight to the
+    scene turned a hierarchy into a row of siblings. The collections are all
+    made before any is linked, because a session lists them in no particular
+    order and a parent is as often written after its child as before.
+    """
+    wanted = {molecule.group for molecule, _, _ in built if molecule.group}
+    names = sorted({name for name in wanted | set(session.groups) if name})
+
+    known: dict[str, Any] = {}
+    fresh: list[str] = []
+    for name in names:
         collection = module.data.collections.get(name)
         if collection is None:
             collection = module.data.collections.new(name)
-            module.context.scene.collection.children.link(collection)
-        for molecule in session.molecules:
-            if molecule.group != name:
-                continue
-            entity = result.molecules.get(molecule.name)
-            if entity is None:
-                continue
-            obj = entity.object
-            for existing in list(obj.users_collection):
-                existing.objects.unlink(obj)
-            collection.objects.link(obj)
+            fresh.append(name)
+        known[name] = collection
+
+    for name in fresh:
+        parent = _group_parent(session.groups, name, known)
+        target = known[parent] if parent else module.context.scene.collection
+        target.children.link(known[name])
+
+    for molecule, entity, _ in built:
+        collection = known.get(molecule.group)
+        if collection is None:
+            continue
+        obj = entity.object
+        for existing in list(obj.users_collection):
+            existing.objects.unlink(obj)
+        collection.objects.link(obj)
+
+
+def _group_parent(groups: dict[str, str], name: str, known: dict[str, Any]) -> str:
+    """The group ``name`` belongs inside, or ``""`` for the scene itself.
+
+    A file can say things a hierarchy cannot mean: that a group is inside one
+    that is not in the session, or that two groups are inside each other. A
+    collection has one parent and Blender would take the first answer given,
+    so both are answered with the scene — a session which is wrong about its
+    hierarchy still loads, rather than hanging on the walk up.
+    """
+    parent = groups.get(name, "")
+    if parent not in known:
+        return ""
+    seen = {name}
+    walk = parent
+    while walk:
+        if walk in seen:
+            return ""
+        seen.add(walk)
+        walk = groups.get(walk, "")
+    return parent
 
 
 # ---------------------------------------------------------------------------
@@ -659,7 +832,9 @@ def _draw_measurements(
         target = result.molecules.get(entry.group) or next(
             iter(result.molecules.values()), None
         )
-        for points, value in zip(entry.points, entry.values, strict=True):
+        for index, (points, value) in enumerate(
+            zip(entry.points, entry.values, strict=True)
+        ):
             measurement = Measurement(
                 kind=entry.kind,
                 value=float(value),
@@ -668,25 +843,36 @@ def _draw_measurements(
                 points=np.asarray(points, dtype=float) * scale,
                 labels=(),
             )
-            measurement.objects.extend(
-                draw_measurement(
-                    measurement,
-                    target=target,
-                    label_avoid_occlusion=False,
-                    # Sized to the frame rather than to the molecule: a
-                    # session's view is as often two angstrom from a contact
-                    # as it is across a whole complex.
-                    label_size=None,
-                    scale=scale,
-                )
-            )
+            try:
+                # Geometry that has nothing to draw is reachable from a real
+                # file: PyMOL takes `dist d, x, x` without complaint, and an
+                # atom absent from a state is read as nan. Both are refused
+                # where the line is made, and one of them used to take the
+                # whole load with it — molecules, materials and lighting
+                # already built and no result to show for them. The errstate
+                # is for the arithmetic on the way to that refusal, which
+                # warns about a division it is right to be doing.
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    drawn = draw_measurement(
+                        measurement,
+                        target=target,
+                        label_avoid_occlusion=False,
+                        # Sized to the frame rather than to the molecule: a
+                        # session's view is as often two angstrom from a
+                        # contact as it is across a whole complex.
+                        label_size=None,
+                        scale=scale,
+                    )
+            except Exception as exc:
+                result.skipped.append(f"{entry.name} ({entry.kind} {index}: {exc})")
+                continue
+            measurement.objects.extend(drawn)
             result.measurements.append(measurement)
 
 
 def _draw_labels(
-    session: PymolSession,
+    built: list[tuple[PymolMolecule, Any, np.ndarray]],
     result: LoadedSession,
-    kept_atoms: dict[str, np.ndarray],
     scale: float,
 ) -> None:
     """Recreate PyMOL's atom labels as Gala label objects.
@@ -697,12 +883,8 @@ def _draw_labels(
     """
     from ..annotate.labels import label
 
-    for molecule in session.molecules:
-        entity = result.molecules.get(molecule.name)
-        if entity is None or not len(molecule.label):
-            continue
-        kept = kept_atoms.get(molecule.name)
-        if kept is None or len(kept) != len(molecule.label):
+    for molecule, entity, kept in built:
+        if not len(molecule.label) or len(kept) != len(molecule.label):
             continue
         n_atoms = _atom_count(entity)
         # Labels are indexed against the atoms that were built, not against

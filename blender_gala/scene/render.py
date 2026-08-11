@@ -371,11 +371,20 @@ def set_image_format(settings: Any, file_format: str, **options: Any) -> None:
             continue
 
 
+#: Formats that already carry alpha and are therefore left alone by
+#: :func:`set_transparent`. A multilayer EXR carries every compositing pass as
+#: well, so replacing one with a PNG for the sake of an alpha channel it
+#: already has throws away the cryptomatte and depth the render was set up for.
+_ALPHA_FORMATS = ("OPEN_EXR", "OPEN_EXR_MULTILAYER")
+
+
 def set_transparent(transparent: bool = True, scene: Any = None) -> None:
     """Enable or disable the transparent film.
 
     Also switches the output to RGBA PNG, because a transparent render written
     as RGB silently loses the alpha channel — a common and confusing failure.
+    A format that already has an alpha channel keeps it, and only its colour
+    mode is corrected.
 
     Parameters
     ----------
@@ -388,9 +397,15 @@ def set_transparent(transparent: bool = True, scene: Any = None) -> None:
     scene = scene or bpy_mod.context.scene
     scene.render.film_transparent = transparent
 
-    if transparent:
+    if not transparent:
+        return
+
+    settings = scene.render.image_settings
+    if settings.file_format in _ALPHA_FORMATS:
+        set_image_format(settings, settings.file_format, color_mode="RGBA")
+    else:
         set_image_format(
-            scene.render.image_settings,
+            settings,
             "PNG",
             color_mode="RGBA",
             color_depth="16",
@@ -434,7 +449,9 @@ def render(
     Parameters
     ----------
     filepath : str, optional
-        Output path. When omitted the scene's existing output path is used.
+        Output path. Blender treats it as a stem: the extension comes from the
+        output format and an animation adds the frame number, so what is
+        written is not always what is asked for.
     animation : bool, optional
         Render the frame range instead of a single still.
     scene : bpy.types.Scene, optional
@@ -443,7 +460,9 @@ def render(
     Returns
     -------
     str
-        The path that was written to.
+        The path that was written to, as Blender resolved it — the first
+        frame's when rendering an animation. Asking for ``shot.jpg`` while the
+        output format is PNG writes, and returns, ``shot.png``.
     """
     bpy_mod = _require_bpy()
     scene = scene or bpy_mod.context.scene
@@ -452,7 +471,12 @@ def render(
     bpy_mod.ops.render.render(
         write_still=not animation, animation=animation, scene=scene.name
     )
-    return scene.render.filepath
+    # `filepath` is the stem Blender starts from, not the file it wrote: it
+    # appends the format's own extension and, for an animation, the frame
+    # number. Returning the stem gives a caller that opens the result a
+    # FileNotFoundError, so the resolved name is returned instead.
+    frame = scene.frame_start if animation else scene.frame_current
+    return str(scene.render.frame_path(frame=frame))
 
 
 @dataclass

@@ -164,6 +164,10 @@ ALPHAFOLD_BANDS: tuple[tuple[float, str, str], ...] = (
 )
 
 
+#: The only characters a hex colour is made of.
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+
+
 def srgb_to_linear(values: np.ndarray) -> np.ndarray:
     """Convert sRGB channel values in ``[0, 1]`` to linear.
 
@@ -224,12 +228,14 @@ def hex_to_rgb(colour: str, linear: bool = True) -> np.ndarray:
     text = colour.lstrip("#").strip()
     if len(text) != 6:
         raise ValueError(f"expected a six-digit hex colour, got {colour!r}")
-    try:
-        channels = np.array(
-            [int(text[i : i + 2], 16) / 255.0 for i in (0, 2, 4)], dtype=float
-        )
-    except ValueError:
-        raise ValueError(f"{colour!r} is not a valid hex colour") from None
+    # `int(..., 16)` is more generous than a colour is: it takes a sign, and it
+    # takes any character Unicode calls a digit, so "+12345" and fullwidth
+    # digits would be read as colours and a sign would make a channel negative.
+    if not set(text) <= _HEX_DIGITS:
+        raise ValueError(f"{colour!r} is not a valid hex colour")
+    channels = np.array(
+        [int(text[i : i + 2], 16) / 255.0 for i in (0, 2, 4)], dtype=float
+    )
     return srgb_to_linear(channels) if linear else channels
 
 

@@ -27,7 +27,11 @@ class _GalaPanel(Panel):
 
     @classmethod
     def poll(cls, context: Any) -> bool:
-        return context.scene is not None
+        # Every `draw` below reads `context.scene.gala` without checking, so
+        # the property group has to be there, not just a scene: the add-on's
+        # properties are registered separately from its panels, and a draw
+        # that raises is a traceback per redraw rather than a missing panel.
+        return getattr(context.scene, "gala", None) is not None
 
 
 class GALA_PT_scene(_GalaPanel):
@@ -270,10 +274,13 @@ class GALA_PT_named_selections(_GalaPanel):
         column.operator("gala.style_alias", icon="SHADING_RENDERED")
 
         # A stored selection is a word in the selection language, which is not
-        # something the panel would otherwise say anywhere.
+        # something the panel would otherwise say anywhere. One named after a
+        # keyword parses as that keyword, so what is quoted here is the form
+        # that actually reaches the selection — `%protein`, not `protein`.
         active = operators.alias_of_object(obj)
         if active:
-            layout.label(text=f'Usable in selections: "{active}"', icon="SYNTAX_ON")
+            word = operators.selection_word(active)
+            layout.label(text=f'Usable in selections: "{word}"', icon="SYNTAX_ON")
 
 
 class GALA_PT_interactions(_GalaPanel):
