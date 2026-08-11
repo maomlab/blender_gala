@@ -20,6 +20,7 @@ import numpy as np
 
 from ..core import chemistry
 from ..core.entity import AtomStructure
+from ..core.exceptions import GalaError
 
 __all__ = [
     "DEFAULT_CRITERIA",
@@ -96,6 +97,11 @@ class InteractionCriteria:
     permissive polar-contact cutoff can pass ``polar_max=3.6`` without editing
     anything.
 
+    A value that is not a distance or an angle — negative, or ``nan`` — is
+    never satisfied, so a mistyped criterion tightens a detector to nothing
+    rather than loosening it. The alternative is worse: a sign typo that
+    reports *more* interactions looks like a discovery.
+
     Attributes
     ----------
     hbond_h_acceptor_max : float
@@ -162,15 +168,68 @@ DEFAULT_CRITERIA = InteractionCriteria()
 # ---------------------------------------------------------------------------
 
 
+def _passes(value: float, minimum: float = -np.inf, maximum: float = np.inf) -> bool:
+    """Whether ``value`` satisfies a criterion's bounds.
+
+    Written as a positive test so that a ``nan`` on either side fails it. The
+    negated form a criterion check falls into naturally — ``if value > maximum:
+    continue`` — accepts what it cannot judge, because every comparison
+    against ``nan`` is False, and a mistyped criterion then loosens the
+    detector silently.
+    """
+    return bool(value >= minimum) and bool(value <= maximum)
+
+
+def _require_finite(coord: np.ndarray, *groups: np.ndarray) -> None:
+    """Refuse coordinates that are not numbers, before scipy does it opaquely.
+
+    An atom absent from the state a structure was loaded for carries ``nan``
+    coordinates, so this is reachable with nothing wrong with the file.
+    cKDTree reports it as "data must be finite", which names neither the
+    add-on nor the atom it came from.
+    """
+    for indices in groups:
+        broken = indices[~np.isfinite(coord[indices]).all(axis=1)]
+        if broken.size:
+            others = (
+                f", and so do {broken.size - 1} more of the atoms being measured"
+                if broken.size > 1
+                else ""
+            )
+            raise GalaError(
+                f"atom {int(broken[0])} has a coordinate that is not a number"
+                f"{others}; no distance can be measured from it. An atom "
+                "missing from the state a structure was loaded for carries nan "
+                "coordinates."
+            )
+
+
 def _pairs_within(
     coord: np.ndarray,
     indices_a: np.ndarray,
     indices_b: np.ndarray,
     cutoff: float,
 ) -> list[tuple[int, int]]:
-    """Return index pairs (a, b) closer than ``cutoff`` ångström."""
+    """Return index pairs (a, b) closer than ``cutoff`` ångström.
+
+    Raises
+    ------
+    GalaError
+        If any atom being measured has a non-finite coordinate.
+    """
     if indices_a.size == 0 or indices_b.size == 0:
         return []
+
+    # A cutoff that is not a positive distance matches nothing. cKDTree takes
+    # the absolute value of a negative radius, so without this a sign typo
+    # searches *wider* than the default while the numpy fallback below — which
+    # compares `distances <= cutoff` — finds nothing, and the two paths
+    # disagree about the same structure. nan is the same mistake seen from the
+    # other side: every comparison against it is False.
+    if np.isnan(cutoff) or cutoff <= 0.0:
+        return []
+
+    _require_finite(coord, indices_a, indices_b)
 
     try:
         from scipy.spatial import cKDTree
@@ -280,11 +339,17 @@ def _ring_atoms(structure: AtomStructure) -> list[tuple[int, ...]]:
     return aromatic_rings(structure)
 
 
-def _ring_plane(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Return the ``(centroid, unit normal)`` of a ring by SVD fit."""
-    centroid = points.mean(axis=0)
-    _, _, vh = np.linalg.svd(points - centroid)
-    return centroid, vh[2] / np.linalg.norm(vh[2])
+def _ring_plane(points: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """Return the ``(centroid, unit normal)`` of a ring, or ``None`` if it has none.
+
+    A ring whose atoms are coincident, collinear or non-finite has no plane,
+    and the normal an SVD hands back for one is an arbitrary member of a
+    perpendicular family — every angle measured against it is meaningless. A
+    ring that has no plane is not a ring, so callers drop it.
+    """
+    from .perception import _plane_of
+
+    return _plane_of(points)
 
 
 def _charged_groups(structure: AtomStructure, positive: bool) -> list[tuple[int, ...]]:
@@ -406,10 +471,10 @@ def hydrogen_bonds(
             best: tuple[float, int] | None = None
             for h in hydrogens:
                 h_a = float(np.linalg.norm(coord[h] - coord[acceptor]))
-                if h_a > criteria.hbond_h_acceptor_max:
+                if not _passes(h_a, maximum=criteria.hbond_h_acceptor_max):
                     continue
                 angle = _angle_between(coord[donor], coord[h], coord[acceptor])
-                if angle < criteria.hbond_angle_min:
+                if not _passes(angle, minimum=criteria.hbond_angle_min):
                     continue
                 if best is None or angle > best[0]:
                     best = (angle, h)
@@ -470,7 +535,7 @@ def polar_contacts(
     found = []
     for i, j in _filter_pairs(structure, pairs, exclude_same_residue, coord=coord):
         distance = float(np.linalg.norm(coord[i] - coord[j]))
-        if distance < criteria.polar_min:
+        if not _passes(distance, minimum=criteria.polar_min):
             continue
         found.append(_make(structure, "polar", i, j, positions, coord))
     return found
@@ -519,7 +584,7 @@ def salt_bridges(
             centre_p = coord[list(pos)].mean(axis=0)
             centre_n = coord[list(neg)].mean(axis=0)
             distance = float(np.linalg.norm(centre_p - centre_n))
-            if distance > criteria.salt_bridge_max:
+            if not _passes(distance, maximum=criteria.salt_bridge_max):
                 continue
             found.append(
                 Interaction(
@@ -569,7 +634,7 @@ def hydrophobic_contacts(
     found = []
     for i, j in _filter_pairs(structure, pairs, exclude_same_residue, coord=coord):
         distance = float(np.linalg.norm(coord[i] - coord[j]))
-        if distance < criteria.hydrophobic_min:
+        if not _passes(distance, minimum=criteria.hydrophobic_min):
             continue
         found.append(_make(structure, "hydrophobic", i, j, positions, coord))
     return found
@@ -598,7 +663,15 @@ def pi_stacking(
     side_b = {int(i) for i in _resolve(structure, selection_b, "b")}
     rings = _ring_atoms(structure)
 
-    planes = [(_ring_plane(coord[list(ring)]), ring) for ring in rings]
+    # Rings with no plane are dropped here rather than reported with an
+    # arbitrary normal: coincident atoms would otherwise stack confidently at
+    # 0 degrees, which is the most convincing wrong answer this module can
+    # give.
+    planes = []
+    for ring in rings:
+        plane = _ring_plane(coord[list(ring)])
+        if plane is not None:
+            planes.append((plane, ring))
 
     found = []
     for index, ((centre_i, normal_i), ring_i) in enumerate(planes):
@@ -613,7 +686,7 @@ def pi_stacking(
 
             offset_vector = centre_j - centre_i
             distance = float(np.linalg.norm(offset_vector))
-            if distance > criteria.pi_stack_max:
+            if not _passes(distance, maximum=criteria.pi_stack_max):
                 continue
 
             angle = float(
@@ -629,11 +702,11 @@ def pi_stacking(
                 )
             )
 
-            parallel = angle <= criteria.pi_stack_parallel_angle
-            t_shaped = angle >= criteria.pi_stack_t_angle_min
+            parallel = _passes(angle, maximum=criteria.pi_stack_parallel_angle)
+            t_shaped = _passes(angle, minimum=criteria.pi_stack_t_angle_min)
             if not (parallel or t_shaped):
                 continue
-            if parallel and offset > criteria.pi_stack_offset_max:
+            if parallel and not _passes(offset, maximum=criteria.pi_stack_offset_max):
                 continue
 
             found.append(
@@ -675,7 +748,10 @@ def cation_pi(
 
     found = []
     for ring in rings:
-        centre, normal = _ring_plane(coord[list(ring)])
+        plane = _ring_plane(coord[list(ring)])
+        if plane is None:
+            continue
+        centre, normal = plane
         for group in cations:
             if set(ring) & set(group):
                 continue
@@ -687,12 +763,12 @@ def cation_pi(
             cation_centre = coord[list(group)].mean(axis=0)
             offset_vector = cation_centre - centre
             distance = float(np.linalg.norm(offset_vector))
-            if distance > criteria.cation_pi_max:
+            if not _passes(distance, maximum=criteria.cation_pi_max):
                 continue
             offset = float(
                 np.linalg.norm(offset_vector - np.dot(offset_vector, normal) * normal)
             )
-            if offset > criteria.cation_pi_offset_max:
+            if not _passes(offset, maximum=criteria.cation_pi_offset_max):
                 continue
             found.append(
                 Interaction(
@@ -750,7 +826,7 @@ def halogen_bonds(
             carbon = attached[0][1]
             angle = _angle_between(coord[carbon], coord[x], coord[acceptor])
             low, high = criteria.halogen_donor_angle
-            if not (low <= angle <= high):
+            if not _passes(angle, minimum=low, maximum=high):
                 continue
             seen.add(key)
             found.append(
@@ -837,7 +913,7 @@ def atom_contacts(
         structure, pairs, exclude_same_residue, exclude_bonded=False
     ):
         distance = float(np.linalg.norm(coord[i] - coord[j]))
-        if distance < minimum:
+        if not _passes(distance, minimum=minimum):
             continue
         found.append(_make(structure, "contact", i, j, positions, coord))
     return found

@@ -1,0 +1,402 @@
+# Robustness testing strategy
+
+The rest of the test suite asks whether a feature is **correct**. This document
+is about whether it **holds up**: what Gala does when the input is a selection
+string someone mistyped into a panel field, a structure with no atoms in it, a
+coordinate that came back as `nan`, a grid whose header lies about its size, or
+a `.pse` that is not a session.
+
+`tests/test_robustness.py` (everything that is just data) and
+`tests/test_robustness_blender.py` (everything that needs a scene) implement
+the permanent part of what follows. The rest is a plan, so that the cases we
+decided *not* to run on every commit are written down rather than forgotten.
+
+---
+
+## 1. What counts as a robustness defect
+
+Gala is a library with a text-field UI on top of it, embedded in an application
+that shows a Python traceback in a console the user is probably not looking at.
+So the bar is not "does not crash". It is one of three contracts:
+
+| Contract | Means |
+|---|---|
+| **It raises the documented error** | A mistyped selection is a `SelectionSyntaxError` carrying the string and a caret, not a `TypeError` from three modules down. The operator layer turns Gala's own exceptions into `self.report({'ERROR'})`; anything else becomes a console traceback. |
+| **It refuses rather than guesses** | A truncated grid, a short mask, a session written with `pse_binary_dump` — reported, never quietly padded, clamped or reinterpreted. A figure that is subtly wrong is worse than one that failed to build. |
+| **It survives** | An empty structure, a Unicode residue name, a `nan` B-factor: an empty result and no traceback. |
+
+A fourth, implicit: **it terminates**. Anything sized from a header field or a
+user-supplied ratio can be asked for more memory or more iterations than exist.
+
+---
+
+## 2. The attack surface
+
+Where untrusted or unusual input actually enters:
+
+| Boundary | Modules | What arrives |
+|---|---|---|
+| **Selection language** | `core/selection.py` | Arbitrary user text, from the API and from panel fields. Tokeniser, recursive-descent parser, expression tree, KD-tree evaluation. The single largest surface. |
+| **Structure adapter** | `core/entity.py`, `core/attributes.py` | Anything callers pass as "a structure": biotite arrays, MN molecules, Blender objects, or none of those. Atom counts that no longer match vertex counts. |
+| **Session deserialisation** | `pymol/session.py` | A **pickle** — the only genuinely hostile input Gala reads. Allow-listed globals; every field index is a trust boundary. |
+| **Session → scene** | `pymol/load.py`, `pymol/save.py` | Object names Blender must accept as datablock names, colour indices, group hierarchies, per-state coordinates. |
+| **OpenDX grids** | `electrostatics/grid.py` | A text header that declares an allocation size, then a data block that may not match it. |
+| **External processes** | `electrostatics/apbs.py` | `subprocess` to APBS and PDB2PQR: executable discovery, `PATH`/env overrides, exit codes, output files that may not appear. |
+| **CSV per-residue data** | `color/coloring.py` | Spreadsheet exports: encodings, blank cells, decimal commas, duplicate keys. |
+| **Numerical algorithms** | `core/geometry.py`, `measure/`, `interactions/detect.py`, `interactions/perception.py`, `electrostatics/grid.py` | Coincident atoms, collinear rings, zero-length vectors, non-finite coordinates, cutoffs the caller chose. |
+| **Colour** | `color/colormaps.py`, `pymol/palette.py` | Hex strings, out-of-range indices, values outside `[0, 1]`, sRGB/linear round trips. |
+| **Blender state** | `ops/operators.py`, `ui/`, `core/viewport.py` | Operators invoked with no active object, in the wrong mode, twice, or out of order. Edit Mode versus Object Mode is a genuine state machine. |
+| **Filesystem** | `pymol/`, `electrostatics/`, `scene/render.py` | Paths that do not exist, are directories, are unwritable, or have a misleading suffix. |
+
+**Not in scope:** Gala never opens a socket and never fetches a URL (Molecular
+Nodes does the fetching). There is no concurrency in Gala itself — no threads,
+no multiprocessing — so "concurrency" reduces to *re-entrancy* (an operator run
+again before the first finished, a depsgraph evaluated mid-write) and to the
+one real shared mutable: Molecular Nodes' session dictionary of entities.
+
+---
+
+## 3. The four tiers
+
+### Tier 1 — permanent, in the normal suite
+
+Runs on every commit, inside Blender, in well under a second. Criteria for
+belonging here:
+
+- deterministic and fast (no sleeps, no large allocations, no subprocesses);
+- the input is one a user could plausibly produce, or one that has already been
+  seen in the wild;
+- the assertion is a contract, not an implementation detail.
+
+Implemented in the two `test_robustness*.py` modules, organised by boundary.
+Where the exact exception type is not the contract, the test accepts a tuple —
+the point is that it *refuses*, not that it refuses with a particular class.
+
+Most of these tests began as `xfail(strict=True)` records of defects found by
+probing the code — each stating the contract that *should* hold and naming the
+bare exception that escaped. That is the workflow to repeat: record the gap as
+a strict xfail, fix the code, and let the resulting `XPASS(strict)` failure tell
+you the fix landed before you delete the marker. See §5 for what was found this
+way and what was done about it.
+
+### Tier 2 — property-based and fuzz, run periodically
+
+Not on every commit: they need `hypothesis` (not currently a dependency) or a
+corpus, and they are non-deterministic by design. Suggested weekly, or on a
+label, writing failures back into Tier 1 as fixed cases.
+
+| Target | Property |
+|---|---|
+| `select` / `describe_selection` | **Round trip.** For any mask over any structure, `select(a, describe_selection(a, mask)) == mask`. This is the single highest-value property in the codebase — the function already self-verifies, so the fuzzer is testing the fallback logic. |
+| Selection parser | **No unexpected exception class.** For any string, `select` raises `SelectionSyntaxError` or returns a bool mask of the right length. Nothing else. Grammar-aware generation (valid tokens in invalid orders) finds more than random bytes. |
+| `expand_selection` | **Monotone and idempotent.** Growing never shrinks; expanding twice at the same level equals expanding once; a larger distance never yields a smaller mask. |
+| Colormap sampling | `sample` is total on `[0, 1]`, monotone in position for a monotone map, and `srgb_to_linear`/`linear_to_srgb` round trip to within 1e-6 on `[0, 1]`. |
+| `PotentialGrid.sample` | Trilinear interpolation reproduces node values exactly at nodes, and stays within the min/max of the eight surrounding corners everywhere else. |
+| Session round trip | `read_session(write_session(s)) == s` for generated sessions: any atom count, any state count, arbitrary Unicode names, `nan` coordinates, colour indices at the ends of the table. |
+| `.pse` reader | **Structured fuzzing.** Take `tests/data/session.pse`, unpickle it with the safe unpickler, mutate the tree (truncate lists, swap types, replace numbers with strings, `nan`, huge ints), re-pickle, read. Every result must be a `PymolSessionError` or a valid `PymolSession`. Byte-level mutation mostly produces unpickling errors and is much less productive. |
+| OpenDX reader | Header/body mutation: counts and `items` disagreeing, missing deltas, non-numeric tokens mid-block, gzip truncation. |
+| `safe_name` | Total, idempotent, never empty, never leading-dot, always a valid geometry-nodes attribute name. |
+
+### Tier 3 — expensive integration and stress, on a schedule
+
+Nightly or weekly; minutes, not milliseconds. These are the ones that need a
+real Blender scene, a real solver, or a large structure.
+
+- **Large structures.** A ribosome-scale import (~10⁵–10⁶ atoms) through
+  `find_interactions`, `expand_selection`, `describe_selection`, `color_by_*`.
+  Watch wall-clock *and* peak RSS: several paths are quadratic in the number of
+  atoms matched, and the KD-tree ones allocate per-pair.
+- **Adversarial geometry at scale.** Every atom at the same coordinate; every
+  atom collinear; a structure that is one residue repeated 10⁵ times. These
+  turn KD-tree queries into all-pairs work.
+- **The APBS pipeline end to end**, including a solver that diverges (`inf` in
+  the map), one that is killed mid-run, and a `GALA_APBS` pointing at something
+  that is not an executable.
+- **Repeated operations.** `publication_setup` a hundred times on one scene;
+  `load_session` of the same file repeatedly; alias create/delete cycles.
+  Assert on datablock counts, not just absence of exceptions — Blender leaks
+  materials, node groups and images very willingly.
+- **Render smoke tests** at tiny resolution across the presets, EEVEE and
+  Cycles, checking the alpha channel actually survives to disk.
+- **Blender version matrix.** Already in CI for 5.1 and 5.2; the robustness
+  additions should ride along, since `bpy` API drift is the most likely source
+  of a regression nobody wrote.
+
+### Tier 4 — exploratory, performed by an LLM agent
+
+Where the value is in *inventing* the input rather than in re-running a fixed
+one. An agent with a Blender it can drive, asked to:
+
+- read a module and try to falsify each documented claim in its docstrings
+  (this document's §5 was produced exactly that way);
+- drive the UI as a confused user would: empty fields, a selection naming an
+  alias that was just deleted, an operator run in Edit Mode with the mesh in a
+  state the panel did not anticipate, undo in the middle of a multi-step
+  operation;
+- cross-check Gala against PyMOL itself on the selection language, where a real
+  PyMOL is available — the language is a compatibility claim, and only a
+  differential test can check it;
+- take a real deposited structure with awkward features (altlocs, insertion
+  codes, negative residue numbers, multiple models, zero-occupancy atoms,
+  UNK residues, D-amino acids) and run the whole public API over it;
+- review a diff for newly introduced boundaries that none of the tiers cover.
+
+Findings from Tier 4 belong in Tier 1 as fixed cases the moment they are
+understood. The agent is a generator, not a gate.
+
+---
+
+## 4. Coverage map
+
+Where each requested category is handled, and by which tier.
+
+| Category | Tier 1 (permanent) | Tier 2/3/4 |
+|---|---|---|
+| Missing / invalid inputs | Empty and whitespace selection strings; `None`, floats, lists and objects passed as selections; missing CSV columns; missing files; `write_session` to a non-existent directory | T4: operators with no active object |
+| Boundary values | `index 0` and `index -5` against 1-based indexing; `within 0`; masks of length n±1; single-node grid; arc `resolution` below 2; a one-atom structure's bounding sphere | T2: property tests at range ends |
+| Empty / degenerate | Zero-atom structure across every macro and every expansion level; empty point list to `sample`; empty session, zero-atom molecule and member-less selection round trips; empty CSV | T3: zero-atom molecule through the whole scene pipeline |
+| Very large inputs | Parse cache bounded at 512 entries; 10 000-character selection values | T3: 10⁶-atom structures, peak RSS |
+| Malformed inputs | 23 malformed selection strings; non-pickles, truncated pickles, corrupt gzip; grids that stop early or disagree with their own header; non-numeric CSV cells | T2: structured mutation fuzzing |
+| Unexpected types / shapes | Float arrays and 2-D masks as selections; non-`(n, 3)` point lists; non-string colours; corrupt name lists and views in a session | T2: type-swap mutation |
+| Unicode / pathological strings | Non-ASCII chain ids, astral-plane characters, embedded NUL, RTL override, combining marks, 10⁴-character values; Unicode object names through a session round trip; `safe_name` over the same set | T4: names Blender itself rejects or truncates |
+| Corrupted files | Truncated, garbage, wrong-suffix and half-gzipped sessions and grids | T2: corpus-driven fuzz |
+| Numerical edge cases | `inf`/`nan`/1e308 cutoffs and comparisons; `nan` coordinates; 1e30 coordinates; non-finite grid values preserved; colour conversion outside `[0, 1]`; degenerate arcs and dashes | T3: solver divergence; T2: interpolation properties |
+| Repeated / adversarial operations | Parse-cache growth under 2 000 distinct strings | T3: repeated setup/load/alias cycles, datablock leak checks |
+| State-machine violations | Operators run after the molecule was deleted, with a template that cannot be formatted, or against a selection that is not there; a failed call leaving half a light rig or an unlinked compositor; repeated setup | T4: Edit vs Object Mode in the GUI, undo after an attribute is destroyed, register/unregister across two installed copies |
+| Resource exhaustion | Header-declared grid size not trusted; parse cache bounded | T3: dash-count blow-up, quadratic contact detection, RSS ceilings |
+| Nondeterminism | Description output is insertion-ordered and verified before it is returned | T2: repeated-run equality; T3: same scene twice |
+| Feature interaction | Describe→select round trips on a real structure; session write→read→write | T3: colour + style + session + measurement in one scene |
+
+---
+
+## 5. What was found, and what was done about it
+
+Every entry below was reproduced by running it — none is hypothetical — and
+every one is now fixed and guarded by a test in `tests/test_robustness.py` or
+`tests/test_robustness_blender.py`. They are grouped by what they cost the
+user, which is not the same as where they lived.
+
+### Data loss and silently wrong results
+
+1. **Storing a selection destroyed the molecule's own data.** An alias named
+   `res_id`, `b_factor`, `Color` or `atomic_number` reached `write_boolean`,
+   which removes a same-named attribute "of the wrong type" — and on a molecule
+   that attribute is Molecular Nodes' per-atom data. `res_id` went from
+   `INT [1, 1, 1]` to `BOOLEAN [True, True, True]`, reporting `FINISHED`.
+   *Now:* the collision is refused, and Object Mode and Edit Mode agree.
+
+2. **A blank element column invented chemistry.** With no element symbols the
+   fallback kept the first *two* letters of the atom name, so `CA` read as
+   calcium: `metal_coordination` went from 2 contacts to **15** on `site.pdb`.
+   *Now:* `_element_of` follows the PDB convention — the single leading letter
+   when it is organic, two only when the two-letter form is a real symbol and
+   the one-letter form is not — with a residue-level correction so `NA` in an
+   ion residue still reads as sodium. Metal, hydrophobic, polar and hydrogen
+   counts are identical with and without the column. One residual, recorded in
+   the test: a ligand's `CL1` reads as carbon, because stripped of its column
+   it is indistinguishable from a delta carbon.
+
+3. **`publication_setup` from the panel ignored the molecule.** The operator
+   resolved the active structure only when it declared `requires_structure`,
+   which this one does not, so the origin, material and framing settings in the
+   same panel did nothing. *Now:* the structure is resolved whenever there is
+   one, and only *required* when the operator says so.
+
+4. **A non-default `scale` put the measurements where the atoms are not.** At
+   `scale=0.005` the atoms still spanned 0.09 BU while the 9 Å measurement was
+   drawn at 0.045. *Now:* the effective scale is taken from the molecule that
+   was actually built, so everything drawn beside it agrees. The parameter
+   cannot be honoured for a molecule — Molecular Nodes 5.2's `Molecule.load`
+   has no `world_scale` argument and its style node groups bake `0.01` in, so
+   rescaling the mesh would give correct atom positions with a cartoon at
+   double thickness — so a request that cannot be met is now *reported* rather
+   than half-applied.
+
+5. **A negative cutoff widened the search.** `cKDTree` takes the absolute value
+   of a negative radius, so `polar_max=-5.0` found 10 contacts where 3.5 Å
+   finds 3. *Now:* a cutoff that is not positive finds nothing, both paths
+   agree, and every criterion goes through a bounds test that a `nan` fails
+   from either side — which also fixes `hbond_angle_min=nan` silently
+   *loosening* a detector.
+
+6. **Rings with no plane were reported as stacked.** Six coincident atoms gave
+   an arbitrary SVD normal and a confident `pi_stacking … (3.80 A, 0 deg)`.
+   *Now:* a ring whose second singular value is at or below 0.05 Å has no
+   plane and is dropped, as are rings of fewer than three atoms and rings with
+   non-finite coordinates. Separately, an unmerged altloc no longer inflates a
+   six-membered ring into a twelve-atom one.
+
+7. **`setup_render` silently discarded every compositing pass** by resetting
+   the format to PNG after `set_exr_output`. *Now:* a format that already has
+   an alpha channel keeps it, and only its colour mode is corrected.
+
+8. **`render()` returned a path it did not write** — `shot.jpg` while the
+   format was PNG wrote `shot.png`. *Now:* it returns
+   `scene.render.frame_path(...)`, the name Blender resolved, and the first
+   frame's when rendering an animation.
+
+9. **A spreadsheet CSV with a byte-order mark was unreadable.** *Now:* read as
+   `utf-8-sig`, and a cell that is not a number reports the file, the line
+   number, the column and the offending text.
+
+10. **`hex_to_rgb` accepted near-misses** — `"+12345"`, `"-fffff"` and
+    fullwidth `"１２３４５６"` were read as colours, two of them with negative
+    channels. *Now:* only the sixteen ASCII hex digits are a colour.
+
+11. **A file that was not an image was accepted as an HDRI**, giving a world
+    lit by a zero-sized image. *Now:* refused once the load can be seen to have
+    failed.
+
+12. **`_net_charge` summed whatever sat in the second-to-last field** of any
+    line starting `ATOM`. *Now:* the full PQR atom layout is required and the
+    last five fields must all read as finite numbers.
+
+13. **Group hierarchy was lost on load and group membership on save.** *Now:*
+    collections are created and then linked into their parents, with a cycle or
+    a missing parent resolving to the scene; and `scene_to_session` records each
+    molecule's collection, excluding Molecular Nodes' own and Gala's.
+
+14. **A state index that did not exist was only checked for multi-state
+    objects.** *Now:* checked for every object of the session.
+
+15. **A selection whose name collided with a mesh attribute** aborted the load
+    from inside `databpy`. *Now:* one that would collide with an attribute of
+    another domain or type is stored as `pymol_<name>` and the rename reported.
+
+16. **`safe_name` mapped distinct names onto one** — `!!!`, `@@@ ###`, `éèê`
+    and `中文选择` all became `selection`. *Now:* a name with no word
+    characters keeps a short digest, so distinct names stay distinct and a
+    CJK-only name is usable.
+
+17. **An alias named after a language keyword was unreachable** while the panel
+    said otherwise. *Now:* the panel quotes the form that actually reaches the
+    selection — `%protein`, not `protein`.
+
+### Bare exceptions where a reported error was intended
+
+18. **A `nan` coordinate broke every spatial selection** with scipy's
+    `data must be finite` — reachable from any multi-state PyMOL session, since
+    absent atoms are stored as `nan`. *Now:* the KD-tree is built from the
+    atoms that have positions and the rest simply never match; non-spatial
+    selections are unaffected, and the fast path is unchanged when every atom
+    is placed. The same reading is now taken by `bounding_sphere` and by the
+    camera's point fit, so a session state with missing atoms frames and lights
+    the atoms it does contain. Only a structure with *nothing* placed is
+    refused.
+
+19. **Deleting the molecule broke every operator.** Molecular Nodes'
+    `Molecule.object` raises `LinkedObjectError`, not `AttributeError`, so the
+    liveness filter never applied and the call sat outside `execute`'s `try`.
+    *Now:* reported, not a traceback.
+
+20. **One degenerate measurement aborted a whole session load** — PyMOL writes
+    `dist d, x, x` without complaint. *Now:* collected into `skipped` with
+    every other per-item failure.
+
+21. **The selection parser exhausted the Python stack** at ~200 nested
+    parentheses or ~2 000 `or` clauses. *Now:* nesting is bounded and reported
+    as a syntax error, and `and`/`or` are n-ary nodes evaluated with a loop, so
+    a long flat chain — which is legal — simply works.
+
+22. **A corrupt session escaped as a bare exception** for a malformed name
+    list, a non-numeric view, or a corrupt gzip header decompressed outside the
+    guard. *Now:* all `PymolSessionError`.
+
+23. **`bounding_sphere()` on a structure with no atoms** raised numpy's
+    `zero-size array to reduction operation maximum`. *Now:* `StructureError`.
+
+24. **`{0}` in a label template escaped as a traceback** because `IndexError`
+    was not in the caught tuple, while every other malformed template was
+    reported. *Now:* caught — as is the `IndexError` `gala.color` raised once
+    the mesh vertex count drifted from the atom count.
+
+25. **Deleting a selection that was not there reported success.** *Now:*
+    `{'CANCELLED'}`.
+
+26. **Non-mesh objects, non-string presets and unknown material names** gave
+    `AttributeError`/`KeyError` from `bpy`. *Now:* `StructureError` and
+    `ValueError`s that name the alternatives.
+
+27. **`read_dx` accepted a grid that was not three-dimensional**, failing much
+    later inside `sample`. *Now:* refused at the point of reading.
+
+28. **The documented negative probe radius did not work** — `probe=-2.0` gave
+    biotite's `Cell size must be greater than 0`. *Now:* the reach is clamped
+    at zero so the sample sphere collapses to the atom centre, as documented,
+    and the cell size is floored separately; `inf` and `nan` are refused.
+
+29. **`potential_at_atoms(points=0)`** returned all-`nan` silently and then
+    made `summary()` raise. *Now:* `points` is validated and `summary()` says
+    "no value at any of N atoms".
+
+30. **`selected_atom_indices` read a different object than the operator acted
+    on**, with no atom-count check, so a picking on an unrelated mesh measured
+    the molecule. *Now:* checked and reported.
+
+31. **`set_origin` run from Edit Mode teleported the molecule**, writing a
+    stale `obj.data.vertices` while still shifting `matrix_world`. *Now:* it
+    goes through `viewport.object_mode()`, as `style_alias` already did.
+
+32. **Panels drew `context.scene.gala` unguarded** while `poll` checked only
+    for a scene. *Now:* `poll` checks the property group.
+
+### A failed call left the scene half-rebuilt
+
+33. **`depth_cue` with `near > far`** removed the compositor nodes before
+    validating, leaving an unlinked output. **`three_point_lighting` with a
+    malformed `LightSpec`** cleared the old rig first and validated each spec
+    only as `bpy` applied it. **`draw_interactions`** aborted on a degenerate
+    contact after creating objects for the earlier ones. *Now:* all three
+    validate before they destroy, and `draw_interactions` skips the degenerate
+    ones with a warning naming them.
+
+34. **`orbit` displaced the camera by the target centre**, reading the pivot's
+    parent inverse before the depsgraph had updated — the opposite of the
+    framing it documents — and `orbit(0)` collapsed the scene range to `0..0`.
+    *Now:* the update happens first and a non-positive frame count is refused.
+
+### Also fixed, without a test of their own
+
+35. **Unbounded work.** `apbs._run` now takes a timeout (an hour by default,
+    plumbed through `run_apbs(timeout=)`) instead of wedging Blender's main
+    thread on a hung solver, and streams child output to the log file rather
+    than buffering it all in memory. `find_executable` requires a *file*, so a
+    directory named `apbs` no longer becomes a `PermissionError`.
+
+36. Smaller: `frame_target` requires a positive margin; `select` reports an
+    out-of-range atom index rather than raising `IndexError`; a value list with
+    no values (`resi +`) is a syntax error; `plip._convert` treats a
+    non-numeric field as absent instead of aborting, and can no longer resolve
+    both sides of an interaction to the same atom; a duplicate object name in a
+    session no longer orphans the first molecule; an object name over 250
+    characters is truncated rather than dropped; and `"could not be written for
+    import"` no longer covers both a filesystem failure and Molecular Nodes
+    being unregistered.
+
+### Still open
+
+- **Quadratic detection.** `atom_contacts` on 3 000 coincident atoms still
+  produces 4.5 M `Interaction` objects, and `salt_bridges` has no spatial
+  index. Both need a bounded-work policy rather than a guard, which is a design
+  decision, not a bug fix. *Tier 3.*
+- **`dash_segments` has no cap** on the number of dashes, so a 10⁴ Å line with
+  a 10⁻³ dash builds five million segments. Non-finite endpoints are refused,
+  but by `round()` rather than deliberately.
+- **`save_session` has no `groups` toggle** to match `load_session(groups=…)`.
+- **`plip._convert`'s fixes are unverified end to end** — PLIP is not
+  installable in this interpreter, so they were exercised against hand-built
+  stand-in records only.
+
+## 6. Running it
+
+```sh
+make test                       # everything, inside Blender — includes tier 1
+make test-fast                  # only what needs no Blender objects
+blender --background --python tests/run_tests.py -- -q \
+    tests/test_robustness.py tests/test_robustness_blender.py
+```
+
+Everything in §5 is fixed and guarded, so the suite is plainly green: there are
+no `xfail` markers left in either module. When the next gap is found, record it
+as a strict xfail first — the `XPASS(strict)` failure is what tells you the fix
+worked.

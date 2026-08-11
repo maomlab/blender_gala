@@ -303,9 +303,21 @@ def setup_compositor(
     -------
     bpy.types.NodeTree
         The compositor node tree.
+
+    Raises
+    ------
+    ValueError
+        If ``depth_cue_range`` is not a usable ``(near, far)``.
     """
     bpy_mod = _require_bpy()
     scene = scene or bpy_mod.context.scene
+
+    # Every argument is checked before the first of them is acted on. The tree
+    # is rebuilt by removing what Gala owns and making it again, so a range
+    # rejected halfway through leaves the scene with an output nothing feeds:
+    # not the old chain, not the new one, and unrenderable either way.
+    if depth_cue_range is not None:
+        depth_cue_range = _checked_depth_range(depth_cue_range)
 
     enable_passes(
         cryptomatte=cryptomatte, depth=True, view_layer=scene_view_layer(scene)
@@ -387,6 +399,34 @@ def scene_view_layer(scene: Any) -> Any:
     return scene.view_layers[0]
 
 
+def _checked_depth_range(depth_range: tuple[float, float]) -> tuple[float, float]:
+    """Return ``(near, far)`` as usable floats, or raise saying why not.
+
+    Separate from :func:`_build_depth_cue` so that :func:`setup_compositor` can
+    refuse the range before it starts pulling the tree apart.
+
+    Raises
+    ------
+    ValueError
+        If the range is not a pair, is not finite, or does not increase.
+    """
+    try:
+        near, far = (float(value) for value in depth_range)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"depth_cue_range must be a (near, far) pair of numbers, "
+            f"got {depth_range!r}"
+        ) from None
+
+    # `far <= near` on its own lets `nan` through, since it compares False
+    # against everything, and a Map Range of `nan` fades the whole frame away.
+    if not math.isfinite(near) or not math.isfinite(far):
+        raise ValueError(f"depth_cue_range must be finite, got {depth_range}")
+    if far <= near:
+        raise ValueError(f"depth_cue_range needs far > near, got {depth_range}")
+    return near, far
+
+
 def _build_depth_cue(
     tree: Any,
     image: Any,
@@ -399,9 +439,6 @@ def _build_depth_cue(
     from ..core import units
 
     near, far = depth_range
-    if far <= near:
-        raise ValueError(f"depth_cue_range needs far > near, got {depth_range}")
-
     scale = units.DEFAULT_WORLD_SCALE
     map_range = _new(tree, "ShaderNodeMapRange", "Depth Cue Range", (x, -250))
     mix = _new(tree, "ShaderNodeMix", "Depth Cue", (x + 220, 0))
@@ -845,6 +882,10 @@ def depth_of_field(
     ------
     RuntimeError
         If there is no camera to configure.
+    ValueError
+        If ``fstop`` is not positive.
+    EmptySelectionError
+        If ``selection`` matches no atoms.
     """
     bpy_mod = _require_bpy()
     scene = scene or bpy_mod.context.scene
@@ -855,12 +896,19 @@ def depth_of_field(
         )
 
     data = camera.data
-    data.dof.use_dof = enable
     if not enable:
+        data.dof.use_dof = False
         return data
 
-    data.dof.aperture_fstop = fstop
+    # A camera aperture of zero is not a very shallow depth of field, it is
+    # none at all — the opposite of what "lower is blurrier" promises, and a
+    # plausible way to spell "as blurry as possible".
+    if not fstop > 0:
+        raise ValueError(f"fstop must be positive, got {fstop}")
 
+    # Resolved before the camera is touched, so that a selection matching no
+    # atoms leaves the camera as it was rather than switching depth of field on
+    # and focusing it wherever it was last pointed.
     focus_object = None
     if target is not None:
         if selection is not None:
@@ -870,6 +918,9 @@ def depth_of_field(
         else:
             structure = AtomStructure.from_any(target)
             focus_object = structure.object
+
+    data.dof.use_dof = True
+    data.dof.aperture_fstop = fstop
 
     if focus_object is not None:
         data.dof.focus_object = focus_object
@@ -901,5 +952,11 @@ def depth_cue(
     Returns
     -------
     bpy.types.NodeTree
+
+    Raises
+    ------
+    ValueError
+        If the range is not finite and increasing. The compositor is left as it
+        was.
     """
     return setup_compositor(depth_cue_range=(near, far), scene=scene)

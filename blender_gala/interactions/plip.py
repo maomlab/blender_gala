@@ -158,8 +158,13 @@ def _serial_lookup(structure: AtomStructure) -> dict[int, int]:
     return {int(serial): index for index, serial in enumerate(np.asarray(serials))}
 
 
-def _coords_of(record: Any, names: tuple[str, ...]) -> np.ndarray | None:
+def _coords_of(
+    record: Any, names: tuple[str, ...], exclude: str | None = None
+) -> tuple[np.ndarray | None, str | None]:
+    """Coordinates from the first of ``names`` the record carries, and which one."""
     for name in names:
+        if name == exclude:
+            continue
         value = getattr(record, name, None)
         if value is None:
             continue
@@ -168,24 +173,54 @@ def _coords_of(record: Any, names: tuple[str, ...]) -> np.ndarray | None:
             array = np.asarray(coords, dtype=float)
         except (TypeError, ValueError):
             continue
-        if array.shape == (3,):
-            return array
-    return None
+        if array.shape == (3,) and np.isfinite(array).all():
+            return array, name
+    return None, None
 
 
-def _serial_of(record: Any, names: tuple[str, ...]) -> int | None:
+def _serial_of(
+    record: Any, names: tuple[str, ...], exclude: str | None = None
+) -> tuple[int | None, str | None]:
+    """Atom serial from the first of ``names`` the record carries, and which one."""
     for name in names:
+        if name == exclude:
+            continue
         value = getattr(record, name, None)
         if value is None:
             continue
         serial = getattr(value, "idx", None)
         if serial is None:
             serial = getattr(value, "atom_orig_idx", None)
-        if serial is not None:
-            return int(serial)
-    return None
+        if serial is None:
+            continue
+        try:
+            return int(serial), name
+        except (TypeError, ValueError):
+            # PLIP's own records always carry an integer index; something
+            # else's do not, and one field being unreadable is no reason to
+            # give up on the record.
+            continue
+    return None, None
 
 
+def _number(value: Any) -> float | None:
+    """``value`` as a finite float, or ``None`` if it is not one."""
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if np.isfinite(number) else None
+
+
+# The two sides overlap on 'a' and 'd': PLIP names the acceptor of a hydrogen
+# bond `a` and the *aromatic* ring of a pi-cation `a`, and `d` is a donor in
+# one record type and a distance-bearing partner in another. Which side each
+# resolves to therefore depends on what the record carries, and the field one
+# side used is excluded from the other's search — otherwise a record with only
+# one of them puts both ends of the interaction on the same atom, and the
+# figure gets a line of zero length.
 _SIDE_A_FIELDS = ("d", "donor", "a", "bsatom", "atom", "protisdon", "restype")
 _SIDE_B_FIELDS = ("a", "acceptor", "ligatom", "d", "metal", "charge")
 
@@ -201,10 +236,13 @@ def _convert(
     """Best-effort conversion of one PLIP record.
 
     PLIP's record types are namedtuples whose fields differ per interaction,
-    so this reads defensively and skips anything it cannot place.
+    so this reads defensively and skips anything it cannot place. Nothing a
+    record carries is trusted to be the type its name suggests: a field that
+    does not read as a number is treated as absent, because one unreadable
+    value is no reason to drop a whole binding site's worth of interactions.
     """
-    serial_a = _serial_of(record, _SIDE_A_FIELDS)
-    serial_b = _serial_of(record, _SIDE_B_FIELDS)
+    serial_a, field_a = _serial_of(record, _SIDE_A_FIELDS)
+    serial_b, _ = _serial_of(record, _SIDE_B_FIELDS, exclude=field_a)
 
     index_a = serial_to_index.get(serial_a) if serial_a is not None else None
     index_b = serial_to_index.get(serial_b) if serial_b is not None else None
@@ -213,22 +251,22 @@ def _convert(
         point_a = positions[index_a]
         point_b = positions[index_b]
     else:
-        raw_a = _coords_of(record, _SIDE_A_FIELDS)
-        raw_b = _coords_of(record, _SIDE_B_FIELDS)
+        raw_a, coord_field_a = _coords_of(record, _SIDE_A_FIELDS)
+        raw_b, _ = _coords_of(record, _SIDE_B_FIELDS, exclude=coord_field_a)
         if raw_a is None or raw_b is None:
             return None
         point_a = raw_a * scale
         point_b = raw_b * scale
 
-    distance = getattr(record, "distance", None)
+    distance = _number(getattr(record, "distance", None))
     if distance is None:
-        distance = getattr(record, "distance_ah", None) or getattr(
-            record, "distance_aw", None
+        distance = _number(getattr(record, "distance_ah", None)) or _number(
+            getattr(record, "distance_aw", None)
         )
     if distance is None:
         distance = float(np.linalg.norm((point_a - point_b) / max(scale, 1e-12)))
 
-    angle = getattr(record, "angle", None)
+    angle = _number(getattr(record, "angle", None))
 
     if structure is not None and index_a is not None and index_b is not None:
         label = (
@@ -244,7 +282,7 @@ def _convert(
         atoms_b=(index_b,) if index_b is not None else (),
         point_a=np.asarray(point_a, dtype=float),
         point_b=np.asarray(point_b, dtype=float),
-        distance=float(distance),
-        angle=float(angle) if angle is not None else None,
+        distance=distance,
+        angle=angle,
         label=label,
     )

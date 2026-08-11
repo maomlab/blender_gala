@@ -633,6 +633,29 @@ def _style_key(node: Any) -> str:
     return raw.strip().replace(" ", "_").replace("-", "_")
 
 
+def _named_material(name: str, bpy_mod: Any) -> Any:
+    """Resolve a material name: a Gala preset first, then the current file.
+
+    ``bpy.data.materials[name]`` on its own reports only
+    ``key "x" not found``, which says nothing about what the alternatives were
+    — while :func:`build_material`, one function along, lists them.
+
+    Raises
+    ------
+    ValueError
+        If the name is neither a preset nor an existing material.
+    """
+    if name in MATERIAL_PRESETS:
+        return get_material(name)
+
+    existing = bpy_mod.data.materials.get(name)
+    if existing is not None:
+        return existing
+
+    choices = sorted(set(MATERIAL_PRESETS) | {m.name for m in bpy_mod.data.materials})
+    raise ValueError(f"unknown material {name!r}; choose from {choices}")
+
+
 def assign_material(target: Any, material: Any, style: str | int | None = None) -> int:
     """Assign one material to a molecule's styles or to a plain object.
 
@@ -651,16 +674,17 @@ def assign_material(target: Any, material: Any, style: str | int | None = None) 
     -------
     int
         Number of style nodes (or material slots) that were changed.
+
+    Raises
+    ------
+    ValueError
+        If ``material`` names neither a Gala preset nor a material in the file.
     """
     bpy_mod = _require_bpy()
 
     resolved = material
     if isinstance(material, str):
-        resolved = (
-            get_material(material)
-            if material in MATERIAL_PRESETS
-            else bpy_mod.data.materials[material]
-        )
+        resolved = _named_material(material, bpy_mod)
 
     obj = getattr(target, "object", target)
     nodes = _style_nodes(target)

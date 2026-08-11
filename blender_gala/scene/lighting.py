@@ -115,6 +115,11 @@ THREE_POINT: tuple[LightSpec, ...] = (
 #: clipping — bright enough to read, with headroom for a glossy ligand.
 _BASE_POWER = 12.0
 
+#: The largest power a light can hold: ``Light.energy`` is a 32-bit float, so a
+#: value computed above this arrives as ``inf``. A 1e30 A coordinate is enough
+#: to get there, and an infinitely bright light renders as a white frame.
+_MAX_ENERGY = float(np.finfo(np.float32).max)
+
 STUDIO_HDRIS = (
     "studio",
     "courtyard",
@@ -134,7 +139,31 @@ def _require_bpy() -> Any:
 
 
 def _subject_bounds(target: Any, scene: Any) -> tuple[np.ndarray, float]:
-    """Return the ``(centre, radius)`` in world Blender units for ``target``."""
+    """Return the ``(centre, radius)`` in world Blender units for ``target``.
+
+    Everything the scene layer sizes comes from these two numbers: where the
+    camera stands, where its clip planes go, how much power each light gets.
+    One non-finite coordinate makes both of them ``nan`` — and ``inf`` does
+    too, since ``inf - inf`` is ``nan`` — which propagates into a camera
+    transform of ``nan`` and lights of ``nan`` watts. That renders black, and
+    a black frame says nothing about the atom that caused it, so the bounds
+    are refused here instead of being passed on.
+    """
+    centre, radius = _bounds_of(target, scene)
+    if not (np.isfinite(centre).all() and math.isfinite(radius)):
+        from ..core.exceptions import GalaError
+
+        raise GalaError(
+            "the subject has non-finite coordinates: its bounds came out as "
+            f"centre {tuple(float(v) for v in centre)}, radius {radius}. There "
+            "is no camera distance or light power to derive from that; check "
+            "the structure for nan or infinite atom positions."
+        )
+    return centre, radius
+
+
+def _bounds_of(target: Any, scene: Any) -> tuple[np.ndarray, float]:
+    """The unchecked ``(centre, radius)``; see :func:`_subject_bounds`."""
     if target is None:
         return _scene_bounds(scene)
     try:
@@ -182,6 +211,73 @@ def _scene_bounds(scene: Any) -> tuple[np.ndarray, float]:
     if not meshes:
         return np.zeros(3), 1.0
     return _object_bounds(meshes)
+
+
+def _as_float(value: Any) -> float | None:
+    """``value`` as a float, or ``None`` if it is not a number at all."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+#: Every numeric field of a :class:`LightSpec`, all of which reach ``bpy``.
+_SPEC_NUMBERS = ("azimuth", "elevation", "power", "size", "distance")
+
+
+def _validate_rig(
+    specs: Sequence[LightSpec],
+    radius: float,
+    energy: float,
+    distance: float,
+    softness: float,
+) -> None:
+    """Refuse a rig that could only fail partway through building itself.
+
+    :func:`three_point_lighting` clears the old rig before it builds the new
+    one, and a :class:`LightSpec` is otherwise only validated by ``bpy`` at the
+    moment it is applied — so a colour of the wrong length, or a size that
+    works out as ``nan``, leaves the scene holding whichever lights happened to
+    come first and no way to tell that from a rig that was never built. The
+    whole rig is therefore checked here, before anything is removed.
+
+    Raises
+    ------
+    ValueError
+        If a spec, or the power it works out at, cannot be applied.
+    """
+    for label, value in (("energy", energy), ("softness", softness)):
+        if not math.isfinite(value):
+            raise ValueError(f"{label} must be finite, got {value}")
+
+    for index, spec in enumerate(specs):
+        where = f"light {getattr(spec, 'name', index)!r}"
+
+        for field in _SPEC_NUMBERS:
+            raw = getattr(spec, field, None)
+            number = _as_float(raw)
+            if number is None or not math.isfinite(number):
+                raise ValueError(
+                    f"{where} has a {field} of {raw!r}; it must be a finite number"
+                )
+
+        try:
+            colour = [float(channel) for channel in spec.colour]
+        except TypeError:
+            colour = []
+        if len(colour) != 3 or not all(math.isfinite(c) for c in colour):
+            raise ValueError(
+                f"{where} has a colour of {spec.colour!r}; it must be three "
+                "finite numbers, as (red, green, blue)"
+            )
+
+        watts = _BASE_POWER * float(spec.power) * energy * (radius * distance) ** 2
+        if not math.isfinite(watts) or abs(watts) > _MAX_ENERGY:
+            raise ValueError(
+                f"{where} works out at {watts} W around a subject of radius "
+                f"{radius}, which is more than a light can hold; the subject is "
+                "too large, or its coordinates are not in angstrom"
+            )
 
 
 def three_point_lighting(
@@ -235,14 +331,19 @@ def three_point_lighting(
     Raises
     ------
     ValueError
-        If ``backend`` is unknown or ``distance`` is not positive.
+        If ``backend`` is unknown, ``distance`` is not positive, or a spec
+        cannot be applied.
+    GalaError
+        If the subject has non-finite coordinates.
     """
     bpy_mod = _require_bpy()
     scene = scene or bpy_mod.context.scene
 
     if backend not in ("gala", "tri_lighting"):
         raise ValueError(f"backend must be 'gala' or 'tri_lighting', got {backend!r}")
-    if distance <= 0:
+    # Not `distance <= 0`, which `nan` passes: every comparison against it is
+    # False, so the one value that breaks every light gets through untouched.
+    if not distance > 0:
         raise ValueError(f"distance must be positive, got {distance}")
 
     if backend == "tri_lighting":
@@ -256,6 +357,8 @@ def three_point_lighting(
         )
 
     centre, radius = _subject_bounds(target, scene)
+    _validate_rig(specs, radius, energy, distance, softness)
+
     clear_lighting(scene=scene)
 
     rig = bpy_mod.data.objects.new(RIG_NAME, None)
@@ -372,6 +475,33 @@ def list_hdris() -> dict[str, str]:
     }
 
 
+def _load_image(path: str) -> Any:
+    """Load an image datablock, or raise if the file is not one.
+
+    Reading ``size`` is what forces the decode; an image whose dimensions come
+    back as zero is the one Blender made to stand in for a file it could not
+    read. The datablock is dropped again so a mistyped path does not leave a
+    broken image behind for the next call to find with ``check_existing``.
+
+    Raises
+    ------
+    ValueError
+        If ``path`` holds no readable image.
+    """
+    bpy_mod = _require_bpy()
+
+    image = bpy_mod.data.images.load(path, check_existing=True)
+    if all(image.size):
+        return image
+
+    if image.users == 0:
+        bpy_mod.data.images.remove(image)
+    raise ValueError(
+        f"{path} is not an image Blender can read; an HDRI must be an .exr or "
+        ".hdr file. Blender's own reason is on stderr."
+    )
+
+
 def hdri_lighting(
     hdri: str = "studio",
     strength: float = 1.0,
@@ -407,6 +537,8 @@ def hdri_lighting(
     ------
     FileNotFoundError
         If ``hdri`` is neither a known name nor an existing file.
+    ValueError
+        If the file exists but is not an image Blender can read.
     """
     bpy_mod = _require_bpy()
     scene = scene or bpy_mod.context.scene
@@ -421,6 +553,13 @@ def hdri_lighting(
             f"HDRI {hdri!r} not found. Use a file path, or one of "
             f"{sorted(builtin) or list(STUDIO_HDRIS)}."
         )
+
+    # Loaded before the world is touched, because this is where a wrong path
+    # that happens to exist is found out. `images.load` does not raise on a
+    # file it cannot decode — it reports `unknown file-format` to stderr and
+    # hands back an image of no size, which lights the scene with nothing at
+    # all while every return value says the call succeeded.
+    image = _load_image(path)
 
     world = scene.world
     if world is None:
@@ -443,7 +582,7 @@ def hdri_lighting(
     mapping.location = (-100, 0)
     coords.location = (-300, 0)
 
-    environment.image = bpy_mod.data.images.load(path, check_existing=True)
+    environment.image = image
     background.inputs["Strength"].default_value = strength
     mapping.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(rotation))
 

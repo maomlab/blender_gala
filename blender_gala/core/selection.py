@@ -253,28 +253,51 @@ class SelectionContext:
         valid = (edges >= 0).all(axis=1) & (edges < self.n_atoms).all(axis=1)
         return edges[valid]
 
+    @property
+    def placed(self) -> np.ndarray:
+        """Which atoms have a coordinate that puts them somewhere."""
+        if "placed" not in self._cache:
+            self._cache["placed"] = np.isfinite(self.coord).all(axis=1)
+        return self._cache["placed"]
+
     def neighbours_within(self, mask: np.ndarray, cutoff: float) -> np.ndarray:
         """Return atoms within ``cutoff`` ångström of any atom in ``mask``."""
         if not mask.any() or cutoff <= 0:
             return np.zeros(self.n_atoms, dtype=bool)
         coord = self.coord
-        source = coord[mask]
+
+        # An atom whose coordinate is not a number is nowhere: it is no
+        # neighbour of anything, and nothing is a neighbour of it. Leaving it
+        # out here rather than refusing the whole selection is what lets a
+        # structure read from a multi-state session — where every atom missing
+        # from the state carries `nan` — be selected from spatially at all.
+        placed = self.placed
+        everywhere = bool(placed.all())
+        points = coord if everywhere else coord[placed]
+        source = coord[mask] if everywhere else coord[mask & placed]
+        if source.size == 0 or points.size == 0:
+            return np.zeros(self.n_atoms, dtype=bool)
+
         try:
             from scipy.spatial import cKDTree
         except ImportError:  # pragma: no cover - scipy ships with Blender + MN
-            deltas = coord[:, None, :] - source[None, :, :]
+            deltas = points[:, None, :] - source[None, :, :]
             distances = np.einsum("ijk,ijk->ij", deltas, deltas)
-            return np.any(distances <= cutoff * cutoff, axis=1)
+            near = np.any(distances <= cutoff * cutoff, axis=1)
+        else:
+            tree = self._cache.get("kdtree")
+            if tree is None:
+                tree = cKDTree(points)
+                self._cache["kdtree"] = tree
+            near = np.zeros(len(points), dtype=bool)
+            for group in tree.query_ball_point(source, r=cutoff):
+                if group:
+                    near[np.asarray(group, dtype=int)] = True
 
-        tree = self._cache.get("kdtree")
-        if tree is None:
-            tree = cKDTree(coord)
-            self._cache["kdtree"] = tree
-        hits = tree.query_ball_point(source, r=cutoff)
+        if everywhere:
+            return near
         out = np.zeros(self.n_atoms, dtype=bool)
-        for group in hits:
-            if group:
-                out[np.asarray(group, dtype=int)] = True
+        out[placed] = near
         return out
 
     def expand_to_residues(self, mask: np.ndarray) -> np.ndarray:
@@ -352,20 +375,34 @@ class _Constant(_Node):
 
 @dataclass
 class _And(_Node):
-    left: _Node
-    right: _Node
+    """The intersection of a whole run of ``and`` clauses.
+
+    A run is one node with many operands rather than a chain of pairs so that
+    evaluating it is a loop. A selection written by a script — one clause per
+    residue of a binding site, joined — is a few thousand clauses long, and a
+    chain of pairs is a few thousand frames deep.
+    """
+
+    operands: tuple[_Node, ...]
 
     def evaluate(self, ctx: SelectionContext) -> np.ndarray:
-        return self.left.evaluate(ctx) & self.right.evaluate(ctx)
+        mask = self.operands[0].evaluate(ctx)
+        for operand in self.operands[1:]:
+            mask = mask & operand.evaluate(ctx)
+        return mask
 
 
 @dataclass
 class _Or(_Node):
-    left: _Node
-    right: _Node
+    """The union of a whole run of ``or`` clauses. See :class:`_And`."""
+
+    operands: tuple[_Node, ...]
 
     def evaluate(self, ctx: SelectionContext) -> np.ndarray:
-        return self.left.evaluate(ctx) | self.right.evaluate(ctx)
+        mask = self.operands[0].evaluate(ctx)
+        for operand in self.operands[1:]:
+            mask = mask | operand.evaluate(ctx)
+        return mask
 
 
 @dataclass
@@ -589,17 +626,76 @@ def _atom_names(ctx: SelectionContext) -> np.ndarray:
     return ctx.upper("atom_name")
 
 
+#: Elements a PDB atom name carries as a single leading letter. The element is
+#: right-justified into columns 13-14, so an organic atom's name starts in
+#: column 14 and everything else starts in column 13 — the distinction that is
+#: lost as soon as the name has been stripped of its whitespace.
+_ORGANIC_ELEMENTS = frozenset({"C", "N", "O", "S", "P", "H"})
+
+#: Every symbol Gala has data for, gathered from the tables in :mod:`.chemistry`.
+#: Enough to tell a real two-letter symbol from the first two letters of a name.
+_KNOWN_ELEMENTS = (
+    frozenset(chemistry.VDW_RADII)
+    | chemistry.METALS
+    | chemistry.HALOGENS
+    | chemistry.HYDROGEN_ELEMENTS
+    | chemistry.POLAR_ELEMENTS
+    | chemistry.ACCEPTOR_ELEMENTS
+    | chemistry.DONOR_ELEMENTS
+)
+
+
+@lru_cache(maxsize=4096)
+def _element_of(name: str) -> str:
+    """Derive an element symbol from an upper-cased PDB atom name.
+
+    Only the convention is left to go on once the name has been stripped: a
+    leading organic letter is the whole symbol, and two letters are read only
+    when the pair is a real element and the single letter is not. That is what
+    keeps ``CA`` the alpha carbon it is in every protein rather than a calcium
+    ion, and ``NZ`` a nitrogen rather than an element that does not exist.
+
+    Parameters
+    ----------
+    name : str
+        An atom name, upper-cased and stripped.
+
+    Returns
+    -------
+    str
+        The element symbol, falling back to carbon for a name with no letters
+        in it at all.
+    """
+    # A leading digit is PyMOL's and CHARMM's way of numbering hydrogens —
+    # `1HB` is a hydrogen, not a name without an element in it.
+    letters = re.sub(r"[^A-Z].*$", "", name.lstrip("0123456789"))
+    if not letters:
+        return "C"
+    single, double = letters[0], letters[:2]
+    if single in _ORGANIC_ELEMENTS:
+        return single
+    if double in _KNOWN_ELEMENTS and single not in _KNOWN_ELEMENTS:
+        return double
+    return single if single in _KNOWN_ELEMENTS else double
+
+
 def _elements(ctx: SelectionContext) -> np.ndarray:
     elements = ctx.upper("element")
-    if not np.any(elements != ""):
-        # Some PDB files omit the element column; fall back to the leading
-        # alphabetic run of the atom name, which is right for the vast
-        # majority of PDB-style names.
-        names = _atom_names(ctx)
-        elements = np.array(
-            [re.sub(r"[^A-Z].*$", "", n)[:2] or "C" for n in names], dtype=object
-        ).astype(str)
-    return elements
+    if np.any(elements != ""):
+        return elements
+
+    # Columns 77-78 are optional and plenty of generated files leave them out,
+    # so the symbol has to come from the atom name and the convention it was
+    # written under.
+    names = _atom_names(ctx)
+    derived = np.array([_element_of(name) for name in names], dtype="<U2")
+    # A monoatomic ion is a residue of one atom named after itself, and it is
+    # the one place the leading-letter rule goes wrong — it would read the
+    # sodium of `NA` as a nitrogen.
+    ion = np.isin(_res_names(ctx), list(chemistry.MONOATOMIC_IONS)) & np.isin(
+        names, list(_KNOWN_ELEMENTS)
+    )
+    return np.where(ion, names, derived)
 
 
 def _flag_or(ctx: SelectionContext, name: str, fallback: np.ndarray) -> np.ndarray:
@@ -801,9 +897,16 @@ _POSTFIX_OPERATORS = {"within", "around", "expand", "gap", "near_to", "beyond"}
 _RANGE_RE = re.compile(r"^(?P<low>-?\d+)?(?P<sep>-|:)(?P<high>-?\d+)?$")
 
 
-def _split_values(raw: str) -> list[str]:
-    parts = [p for chunk in raw.split("+") for p in chunk.split(",")]
-    return [p for p in parts if p != ""]
+def _split_values(raw: str, token: _Token, text: str) -> list[str]:
+    """Split a ``+``/``,``-separated value list, refusing one with no values.
+
+    ``resi +`` is a half-finished edit, not a request for no residues; without
+    this it would parse cleanly and then quietly match nothing.
+    """
+    parts = [p for chunk in raw.split("+") for p in chunk.split(",") if p != ""]
+    if not parts:
+        raise SelectionSyntaxError(f"expected a value, got {raw!r}", text, token.pos)
+    return parts
 
 
 def _parse_int_values(
@@ -811,7 +914,7 @@ def _parse_int_values(
 ) -> tuple[tuple[int, ...], tuple[tuple[int | None, int | None], ...]]:
     singles: list[int] = []
     ranges: list[tuple[int | None, int | None]] = []
-    for part in _split_values(raw):
+    for part in _split_values(raw, token, text):
         cleaned = part.replace("\\", "")
         if re.fullmatch(r"-?\d+", cleaned):
             singles.append(int(cleaned))
@@ -835,11 +938,20 @@ def _parse_int_values(
 # ---------------------------------------------------------------------------
 
 
+#: How deeply one selection may nest. A selection string is unbounded input
+#: from a text field, and recursive descent answers a deeply nested one by
+#: exhausting the interpreter's stack rather than by saying anything. Even
+#: `byres ((protein and chain A) within 4 of (ligand or metals))` is five
+#: levels, so anything approaching this is a stuck key or a generated string.
+_MAX_NESTING = 64
+
+
 class _Parser:
     def __init__(self, text: str) -> None:
         self.text = text
         self.tokens = _tokenize(text)
         self.pos = 0
+        self.depth = 0
 
     # -- token helpers ---------------------------------------------------
     def peek(self) -> _Token | None:
@@ -860,6 +972,16 @@ class _Parser:
             token is not None and token.kind == "word" and token.text.lower() in words
         )
 
+    def descend(self, token: _Token) -> None:
+        """Enter one level of nesting, or report that there are too many."""
+        self.depth += 1
+        if self.depth > _MAX_NESTING:
+            raise SelectionSyntaxError(
+                f"selection nests more than {_MAX_NESTING} levels deep",
+                self.text,
+                token.pos,
+            )
+
     def expect_word(self, word: str) -> _Token:
         token = self.peek()
         if token is None or token.kind != "word" or token.text.lower() != word:
@@ -878,7 +1000,7 @@ class _Parser:
         return node
 
     def parse_or(self) -> _Node:
-        node = self.parse_and()
+        operands = [self.parse_and()]
         while True:
             token = self.peek()
             if token is None:
@@ -887,13 +1009,13 @@ class _Parser:
                 token.kind == "word" and token.text.lower() in ("or", "||")
             ):
                 self.next()
-                node = _Or(node, self.parse_and())
+                operands.append(self.parse_and())
             else:
                 break
-        return node
+        return operands[0] if len(operands) == 1 else _Or(tuple(operands))
 
     def parse_and(self) -> _Node:
-        node = self.parse_postfix()
+        operands = [self.parse_postfix()]
         while True:
             token = self.peek()
             if token is None:
@@ -902,10 +1024,10 @@ class _Parser:
                 token.kind == "word" and token.text.lower() == "and"
             ):
                 self.next()
-                node = _And(node, self.parse_postfix())
+                operands.append(self.parse_postfix())
             else:
                 break
-        return node
+        return operands[0] if len(operands) == 1 else _And(tuple(operands))
 
     def parse_postfix(self) -> _Node:
         node = self.parse_unary()
@@ -919,7 +1041,9 @@ class _Parser:
                 self.expect_word("of")
                 reference = self.parse_unary()
                 if word == "beyond":
-                    node = _And(node, _Not(_Within(_Constant(True), reference, cutoff)))
+                    node = _And(
+                        (node, _Not(_Within(_Constant(True), reference, cutoff)))
+                    )
                 else:
                     node = _Within(node, reference, cutoff)
             elif word == "around" or word == "gap":
@@ -936,12 +1060,12 @@ class _Parser:
             )
         if token.kind == "not":
             self.next()
-            return _Not(self.parse_unary())
+            return _Not(self.parse_operand(token))
         if token.kind == "word":
             word = token.text.lower()
             if word in _UNARY_PREFIXES:
                 self.next()
-                operand = self.parse_unary()
+                operand = self.parse_operand(token)
                 if word == "not":
                     return _Not(operand)
                 if word in ("byres", "byresidue"):
@@ -953,10 +1077,19 @@ class _Parser:
                 return _Edge(operand, last=(word == "last"))
         return self.parse_primary()
 
+    def parse_operand(self, token: _Token) -> _Node:
+        """Parse the operand of a prefix operator, one level further in."""
+        self.descend(token)
+        node = self.parse_unary()
+        self.depth -= 1
+        return node
+
     def parse_primary(self) -> _Node:
         token = self.next()
         if token.kind == "lparen":
+            self.descend(token)
             node = self.parse_or()
+            self.depth -= 1
             closing = self.peek()
             if closing is None or closing.kind != "rparen":
                 pos = closing.pos if closing else len(self.text)
@@ -1005,6 +1138,10 @@ class _Parser:
                 token.pos,
             ) from exc
 
+    def _values(self, token: _Token) -> tuple[str, ...]:
+        """The upper-cased values of a ``+``/``,``-separated value list."""
+        return tuple(v.upper() for v in _split_values(token.text, token, self.text))
+
     def _parse_property(self, word: str, token: _Token) -> _Node:
         annotation, kind = PROPERTY_KEYWORDS[word]
 
@@ -1021,17 +1158,9 @@ class _Parser:
             operator = comparison.text
             if kind == "str":
                 if operator in ("=", "=="):
-                    return _StringMatch(
-                        annotation,
-                        tuple(v.upper() for v in _split_values(value_token.text)),
-                    )
+                    return _StringMatch(annotation, self._values(value_token))
                 if operator in ("!=", "<>"):
-                    return _Not(
-                        _StringMatch(
-                            annotation,
-                            tuple(v.upper() for v in _split_values(value_token.text)),
-                        )
-                    )
+                    return _Not(_StringMatch(annotation, self._values(value_token)))
                 raise SelectionSyntaxError(
                     f"{word!r} does not support the {operator!r} operator",
                     self.text,
@@ -1054,9 +1183,7 @@ class _Parser:
         value_token = self.next()
 
         if kind == "str":
-            return _StringMatch(
-                annotation, tuple(v.upper() for v in _split_values(value_token.text))
-            )
+            return _StringMatch(annotation, self._values(value_token))
         if kind == "float":
             try:
                 number = float(value_token.text)
@@ -1233,6 +1360,15 @@ def select(
                 f"boolean mask has length {coerced.shape[0]}, expected {n_atoms}"
             )
         return coerced
+    # Negative indices count from the end, as everywhere else in numpy; only an
+    # index outside the structure altogether is a mistake, and the bare
+    # IndexError numpy raises for it names neither the structure nor its size.
+    outside = coerced[(coerced >= n_atoms) | (coerced < -n_atoms)]
+    if outside.size:
+        raise ValueError(
+            f"atom index {int(outside.flat[0])} is out of range for a "
+            f"structure of {n_atoms} atoms"
+        )
     mask = np.zeros(n_atoms, dtype=bool)
     mask[coerced] = True
     return mask

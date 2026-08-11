@@ -194,6 +194,15 @@ def read_dx(path: str) -> PotentialGrid:
         if counts is None or origin is None or items is None or len(deltas) != 3:
             raise ValueError(f"{path}: not an OpenDX grid, or the header is truncated")
 
+        if counts.size != 3:
+            # Refused here rather than reshaped anyway: a grid of any other
+            # rank reads as a file that loads and then fails inside `sample`,
+            # a long way from the header that caused it.
+            raise ValueError(
+                f"{path}: the header counts {counts.size} axes, and this reader "
+                "reads the three-dimensional grids APBS writes"
+            )
+
         matrix = np.array(deltas)
         off_axis = matrix - np.diag(np.diag(matrix))
         if np.abs(off_axis).max() > 1e-9:

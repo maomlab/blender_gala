@@ -121,10 +121,19 @@ def get_preset(preset: str | RenderPreset) -> RenderPreset:
     Raises
     ------
     ValueError
-        If the name is not a known preset.
+        If ``preset`` is not a string, or is not a known preset name.
     """
     if isinstance(preset, RenderPreset):
         return preset
+    # Checked before `.lower()` rather than after: `None`, `3` and a list of
+    # names are all plausible things to arrive here — `publication_setup`
+    # passes this argument straight through — and each of them otherwise gives
+    # an AttributeError about `lower` instead of the error documented above.
+    if not isinstance(preset, str):
+        raise ValueError(
+            f"render preset must be a name or a RenderPreset, got {preset!r}; "
+            f"choose from {sorted(PRESETS)}"
+        )
     try:
         return PRESETS[preset.lower()]
     except KeyError:

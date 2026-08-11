@@ -29,9 +29,11 @@ from ..core import attributes as gala_attributes
 from ..core import collections as gala_collections
 from ..core import interactive as gala_interactive
 from ..core import mn as mn_bridge
+from ..core import viewport
 from ..core.entity import AtomStructure
 from ..core.exceptions import GalaError
 from ..core.registration import register_classes, unregister_classes
+from ..core.selection import MACRO_KEYWORDS, PROPERTY_KEYWORDS
 from ..electrostatics import grid as gala_grid
 from ..electrostatics import surface as electrostatics
 from ..interactions import detect
@@ -47,6 +49,7 @@ __all__ = [
     "alias_of_object",
     "classes",
     "selected_atom_indices",
+    "selection_word",
 ]
 
 #: The Molecular Nodes styles worth offering for a named selection. Molecular
@@ -99,10 +102,31 @@ def active_structure(context: Any) -> AtomStructure | None:
 
     # The session outlives the objects it tracks, so entries whose object has
     # been deleted have to be filtered out or the panel acts on a ghost.
-    live = [m for m in molecules if _object_is_alive(getattr(m, "object", None))]
-    if len(live) == 1:
+    live = [m for m in molecules if _object_is_alive(_molecule_object(m))]
+    if len(live) != 1:
+        return None
+    try:
         return AtomStructure.from_any(live[0])
-    return None
+    except Exception:
+        # Every operator resolves the structure, including the ones that go on
+        # without one, so a molecule that cannot be read must leave them with
+        # nothing rather than with an exception.
+        return None
+
+
+def _molecule_object(molecule: Any) -> Any:
+    """The Blender object behind a Molecular Nodes molecule, or ``None``.
+
+    ``Molecule.object`` is a property that raises ``LinkedObjectError`` once
+    the object it wraps has been deleted, and that is not an ``AttributeError``
+    — so the default of a ``getattr`` never applies and the exception has to be
+    caught here, or every button throws a traceback after one press of X in the
+    outliner.
+    """
+    try:
+        return molecule.object
+    except Exception:
+        return None
 
 
 def _object_is_alive(obj: Any) -> bool:
@@ -114,14 +138,46 @@ def _object_is_alive(obj: Any) -> bool:
         return False
 
 
-def selected_atom_indices(context: Any) -> list[int]:
+def selection_word(name: str) -> str:
+    """How a stored selection has to be written to be read back as one.
+
+    A name that is also a word in the selection language — ``protein``, ``all``,
+    ``b`` — parses as that word, so the only way to reach the stored selection
+    is PyMOL's explicit ``%name`` form. Saying so is the panel's job: the name
+    was accepted, and the user has no way of knowing which words are taken.
+    """
+    if name in MACRO_KEYWORDS or name in PROPERTY_KEYWORDS:
+        return f"%{name}"
+    return name
+
+
+def selected_atom_indices(
+    context: Any, structure: AtomStructure | None = None
+) -> list[int]:
     """Return the indices of the atoms the user has selected.
 
     Works in both Edit Mode (via bmesh) and Object Mode (via the stored
     selection flags), so the measurement operator behaves like PyMOL's wizard:
     click atoms, then measure.
+
+    Parameters
+    ----------
+    context : bpy.types.Context
+        The context to read the active object from.
+    structure : AtomStructure, optional
+        The structure the caller is about to act on. The picking is then read
+        from *its* object rather than from whatever happens to be active, which
+        need not be the same thing: :func:`active_structure` falls back to the
+        only molecule in the session, so a selection made on an unrelated mesh
+        would otherwise be applied to the molecule's atoms.
+
+    Raises
+    ------
+    ValueError
+        If an index lands past the end of the structure, which is what a mesh
+        edited to a different vertex count leaves behind.
     """
-    obj = context.active_object
+    obj = context.active_object if structure is None else structure.object
     if obj is None or obj.type != "MESH":
         return []
 
@@ -129,12 +185,20 @@ def selected_atom_indices(context: Any) -> list[int]:
         import bmesh
 
         mesh = bmesh.from_edit_mesh(obj.data)
-        return [vertex.index for vertex in mesh.verts if vertex.select]
+        indices = [vertex.index for vertex in mesh.verts if vertex.select]
+    else:
+        vertices = obj.data.vertices
+        flags = np.empty(len(vertices), dtype=bool)
+        vertices.foreach_get("select", flags)
+        indices = [int(i) for i in np.flatnonzero(flags)]
 
-    vertices = obj.data.vertices
-    flags = np.empty(len(vertices), dtype=bool)
-    vertices.foreach_get("select", flags)
-    return [int(i) for i in np.flatnonzero(flags)]
+    if indices and structure is not None and max(indices) >= structure.n_atoms:
+        raise ValueError(
+            f"{obj.name!r} has vertices past atom {structure.n_atoms - 1}, the "
+            "last of the structure: the mesh and the atoms are out of step. "
+            "Undo the edit that changed the vertex count."
+        )
+    return indices
 
 
 def active_alias(structure: AtomStructure | None) -> str | None:
@@ -183,14 +247,19 @@ class _GalaOperator(Operator):
         return context.scene is not None
 
     def execute(self, context: Any) -> set[str]:
-        structure = active_structure(context) if self.requires_structure else None
-        if self.requires_structure and structure is None:
-            self.report(
-                {"ERROR"},
-                "Select a molecule imported with Molecular Nodes first.",
-            )
-            return {"CANCELLED"}
         try:
+            # Resolved whether or not it is required, and inside the try: the
+            # scene-wide operators still want the molecule when there is one —
+            # framing, origin and materials are all settings the same panel
+            # offers — and resolving it is itself something that can fail once
+            # the object behind a molecule has been deleted.
+            structure = active_structure(context)
+            if self.requires_structure and structure is None:
+                self.report(
+                    {"ERROR"},
+                    "Select a molecule imported with Molecular Nodes first.",
+                )
+                return {"CANCELLED"}
             return self.run(context, structure)
         except GalaError as exc:
             return _report_error(self, exc)
@@ -198,6 +267,9 @@ class _GalaOperator(Operator):
             ValueError,
             TypeError,
             KeyError,
+            # A mask read from a mesh whose vertex count has drifted from the
+            # structure, or a label template with a positional field in it.
+            IndexError,
             RuntimeError,
             FileNotFoundError,
         ) as exc:
@@ -333,11 +405,17 @@ class GALA_OT_set_origin(_GalaOperator):
         if props.origin_method == "none":
             self.report({"INFO"}, "Origin method is set to 'Leave Alone'.")
             return {"CANCELLED"}
-        origin.set_origin_to_geometry(
-            structure,
-            method=props.origin_method,
-            move_to_world_origin=props.move_to_world_origin,
-        )
+        # Moving the origin rewrites the mesh vertices and shifts the object
+        # transform to compensate. In Edit Mode the vertices are a stale copy
+        # of what the user is looking at, so the write would be thrown away and
+        # only the transform would survive: the molecule jumps by its own
+        # centroid the moment the mode is toggled back.
+        with viewport.object_mode(structure.object):
+            origin.set_origin_to_geometry(
+                structure,
+                method=props.origin_method,
+                move_to_world_origin=props.move_to_world_origin,
+            )
         return {"FINISHED"}
 
 
@@ -517,6 +595,18 @@ class GALA_OT_create_alias(_GalaOperator):
             self.report({"ERROR"}, "Give the selection a name first.")
             return {"CANCELLED"}
 
+        # The name box is where a user types 'res_id' without knowing that the
+        # residue numbering is stored under that name, so the collision is
+        # caught before anything is written. A warning rather than an error:
+        # nothing has gone wrong, the name box still holds what was typed, and
+        # the next thing to do is edit it.
+        wanted = gala_attributes.safe_name(name)
+        conflict = gala_attributes.attribute_conflict(structure.object, wanted)
+        if conflict is not None:
+            self.report({"WARNING"}, conflict)
+            return {"CANCELLED"}
+        replacing = wanted in gala_attributes.registered(structure.object)
+
         selection: Any = None
         if self.source == "text":
             selection = props.selection_text.strip()
@@ -537,8 +627,13 @@ class GALA_OT_create_alias(_GalaOperator):
                 break
         props.alias_name = _next_alias_name(names)
 
+        # Storing over a name that was already in the list is a replacement,
+        # and the count in the report is the only clue that the selection the
+        # user had under that name is gone.
         self.report(
-            {"INFO"}, f"Stored {stored!r}: {_selection_summary(structure, mask)}."
+            {"INFO"},
+            f"{'Replaced' if replacing else 'Stored'} {stored!r}: "
+            f"{_selection_summary(structure, mask)}.",
         )
         return {"FINISHED"}
 
@@ -627,7 +722,9 @@ class GALA_OT_delete_alias(_AliasOperator):
         if name is None:
             self.report({"ERROR"}, "There are no stored selections.")
             return {"CANCELLED"}
-        gala_interactive.delete_alias(structure, name)
+        if not gala_interactive.delete_alias(structure, name):
+            self.report({"WARNING"}, f"There is no stored selection named {name!r}.")
+            return {"CANCELLED"}
         structure.object.gala_selection_index = 0
         self.report({"INFO"}, f"Removed {name!r}.")
         return {"FINISHED"}
@@ -743,7 +840,7 @@ class GALA_OT_measure(_GalaOperator):
                 part.strip() for part in text.split(";") if part.strip()
             ]
         else:
-            indices = selected_atom_indices(context)
+            indices = selected_atom_indices(context, structure)
             if not 2 <= len(indices) <= 4:
                 self.report(
                     {"ERROR"},

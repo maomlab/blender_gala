@@ -64,6 +64,12 @@ _DEFAULT_RADIUS = 0.77
 #: enough for a long C-S bond, tight enough to exclude a close contact.
 _BOND_TOLERANCE = 1.25
 
+#: Ångström. How far a set of points has to spread in its second principal
+#: direction before it counts as having a plane at all. Well below anything a
+#: real ring gives, and well above the rounding of coordinates that are all
+#: the same point.
+_PLANE_EXTENT = 0.05
+
 #: Metals are excluded from bond perception. Coordination distances overlap
 #: with covalent ones, so including them fuses a whole binding site into one
 #: connected component and ruins ring perception.
@@ -210,11 +216,49 @@ def find_rings(
     return list(rings.values())
 
 
+def _plane_of(points: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    """Return the ``(centroid, unit normal)`` of a best-fit plane, or ``None``.
+
+    ``None`` means the points do not define a plane: there are fewer than
+    three of them, one of them is not a number, or they are coincident or
+    collinear. In every one of those cases the SVD still returns a normal —
+    an arbitrary member of the perpendicular family — and an angle measured
+    against it is meaningless, which is far harder to notice than a missing
+    result.
+
+    Parameters
+    ----------
+    points : numpy.ndarray
+        Shape ``(n, 3)``, in ångström.
+
+    Returns
+    -------
+    tuple of (numpy.ndarray, numpy.ndarray) or None
+    """
+    if points.ndim != 2 or points.shape[0] < 3 or not np.isfinite(points).all():
+        return None
+
+    centroid = points.mean(axis=0)
+    try:
+        _, singular, vh = np.linalg.svd(points - centroid)
+    except np.linalg.LinAlgError:  # pragma: no cover - coordinates this hostile
+        return None
+
+    # The second singular value is how far the points spread in their second
+    # principal direction, so it is what separates a plane from a line or a
+    # point. A five- or six-membered ring gives about 2; coincident atoms
+    # (unmerged altlocs, a collapsed minimisation) give zero.
+    if singular[1] <= _PLANE_EXTENT:
+        return None
+    return centroid, vh[2] / np.linalg.norm(vh[2])
+
+
 def _is_planar(points: np.ndarray, tolerance: float = 0.25) -> bool:
     """Whether every point lies within ``tolerance`` ångström of a best-fit plane."""
-    centroid = points.mean(axis=0)
-    _, _, vh = np.linalg.svd(points - centroid)
-    normal = vh[2]
+    plane = _plane_of(points)
+    if plane is None:
+        return False
+    centroid, normal = plane
     return bool(np.abs((points - centroid) @ normal).max() <= tolerance)
 
 
@@ -256,7 +300,11 @@ def aromatic_rings(structure: AtomStructure) -> list[tuple[int, ...]]:
         tabled[member] = True
         for ring_names in table:
             members = tuple(int(i) for i in member if atom_names[i] in ring_names)
-            if len(members) >= len(ring_names) - 1:
+            # One atom short is still a usable ring; more atoms than the ring
+            # has names means the residue carries two conformers of it —
+            # unmerged altlocs, which PDB files have routinely — and a
+            # centroid and plane fitted across both belong to neither.
+            if len(ring_names) - 1 <= len(members) <= len(ring_names):
                 rings.append(members)
 
     # Geometric perception for everything the tables did not cover.

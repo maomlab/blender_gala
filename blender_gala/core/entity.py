@@ -240,8 +240,29 @@ class AtomStructure:
             Centre in Blender units and radius in Blender units. A structure
             with a single atom gets a small non-zero radius so that callers
             sizing lights or cameras never divide by zero.
+
+        Raises
+        ------
+        StructureError
+            If no atom of the structure has a position.
+
+        Notes
+        -----
+        Atoms whose coordinates are not finite are left out rather than making
+        the whole answer ``nan``. A structure read from one state of a
+        multi-state session carries ``nan`` for the atoms that state does not
+        contain, and the bounds of the atoms it *does* contain are the useful
+        answer — the same reading the selection language takes of a missing
+        coordinate.
         """
         positions = self.world_positions()
+        if positions.size:
+            positions = positions[np.isfinite(positions).all(axis=1)]
+        if positions.size == 0:
+            # Framing, lighting and orbiting all start from this, and a
+            # structure with nothing placed has no centre to offer them; numpy
+            # would say so only as a warning about the mean of an empty slice.
+            raise StructureError(f"{self.name!r} has no placed atoms to bound")
         centre = positions.mean(axis=0)
         radius = float(np.linalg.norm(positions - centre, axis=1).max())
         return centre, max(radius, 1e-4)

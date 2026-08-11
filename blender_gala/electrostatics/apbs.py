@@ -32,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,6 +54,17 @@ _ENV_VARS = {"apbs": "GALA_APBS", "pdb2pqr": "GALA_PDB2PQR"}
 
 #: Other names the same program goes by.
 _ALIASES = {"pdb2pqr": ("pdb2pqr", "pdb2pqr30", "pdb2pqr.exe")}
+
+#: Fields in the shortest PQR atom line: record name, serial, atom name,
+#: residue name, residue number, x, y, z, charge, radius. A chain identifier
+#: makes eleven.
+_PQR_MINIMUM_FIELDS = 10
+
+#: Seconds. How long APBS or PDB2PQR may run before Gala stops waiting.
+#: Generous, because a large solute genuinely takes many minutes; it is there
+#: for the run that has hung, which would otherwise hold Blender's main thread
+#: forever with no way to cancel it.
+DEFAULT_TIMEOUT = 3600.0
 
 
 class ApbsUnavailable(GalaError):
@@ -136,7 +148,14 @@ def find_executable(program: str, override: str | None = None) -> str:
     for candidate in candidates:
         if not candidate:
             continue
-        if os.path.isabs(candidate) and os.access(candidate, os.X_OK):
+        # `os.access(..., X_OK)` is true of a directory, and a directory that
+        # happens to be called `apbs` would then be handed to subprocess and
+        # come back as a bare PermissionError from three modules down.
+        if (
+            os.path.isabs(candidate)
+            and os.path.isfile(candidate)
+            and os.access(candidate, os.X_OK)
+        ):
             return candidate
         found = shutil.which(candidate)
         if found:
@@ -161,23 +180,49 @@ def _environment(executable: str) -> dict[str, str]:
     return env
 
 
-def _run(command: list[str], workdir: str, log: str) -> subprocess.CompletedProcess:
-    """Run a command in ``workdir``, keeping its output next to its results."""
-    result = subprocess.run(
-        command,
-        cwd=workdir,
-        env=_environment(command[0]),
-        capture_output=True,
-        text=True,
-    )
-    with open(os.path.join(workdir, log), "w") as handle:
-        handle.write(result.stdout)
-        handle.write(result.stderr)
+def _run(
+    command: list[str],
+    workdir: str,
+    log: str,
+    timeout: float | None = DEFAULT_TIMEOUT,
+) -> subprocess.CompletedProcess:
+    """Run a command in ``workdir``, keeping its output next to its results.
+
+    Output is written straight to the log file rather than through a pipe:
+    both programs are chatty, and one that decides to write hundreds of
+    megabytes would otherwise be held in memory in full — and written to disk
+    in full afterwards — before anything could look at it. Only the tail is
+    read back, and only when the run failed.
+    """
+    path = os.path.join(workdir, log)
+    with open(path, "w") as handle:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=workdir,
+                env=_environment(command[0]),
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise GalaError(
+                f"{os.path.basename(command[0])} did not finish within "
+                f"{timeout:g} s and was stopped; Blender would otherwise wait "
+                f"on it forever. What it wrote before then is in {path}. Pass "
+                "a larger timeout= to run_apbs if the solute really is that big."
+            ) from exc
+        except OSError as exc:
+            raise GalaError(f"{command[0]} could not be run: {exc}") from exc
+
     if result.returncode != 0:
-        tail = "\n".join((result.stdout + result.stderr).splitlines()[-15:])
+        with open(path) as handle:
+            tail = "".join(deque(handle, maxlen=15)).rstrip()
         raise GalaError(
             f"{os.path.basename(command[0])} failed (exit {result.returncode}). "
-            f"Full output in {os.path.join(workdir, log)}:\n{tail}"
+            f"Full output in {path}:\n{tail}"
         )
     return result
 
@@ -215,18 +260,32 @@ def write_pdb(target: Any, path: str) -> str:
 
 
 def _net_charge(pqr_path: str) -> float:
-    """Sum the charge column of a PQR file."""
+    """Sum the charge column of a PQR file.
+
+    A PQR line is a PDB line with charge and radius in place of occupancy and
+    B-factor, written whitespace-separated rather than column-aligned: record
+    name, serial, atom name, residue name, an optional chain, residue number,
+    *x*, *y*, *z*, charge, radius. Only a line carrying all of that, whose
+    last five fields all read as numbers, is an atom — anything shorter is
+    something else that happens to begin with ``ATOM`` and has no charge to
+    add. A charge that is not finite is not a charge either: a ``nan`` here
+    would become the net charge, which is the one number that says whether
+    PDB2PQR protonated the structure sensibly.
+    """
     total = 0.0
     with open(pqr_path) as handle:
         for line in handle:
-            if line.startswith(("ATOM", "HETATM")):
-                fields = line.split()
-                if len(fields) >= 2:
-                    # A PQR line is a PDB line with charge and radius in place
-                    # of occupancy and B-factor; anything else in the file is
-                    # not an atom and has no charge to add.
-                    with contextlib.suppress(ValueError):
-                        total += float(fields[-2])
+            if not line.startswith(("ATOM", "HETATM")):
+                continue
+            fields = line.split()
+            if len(fields) < _PQR_MINIMUM_FIELDS:
+                continue
+            with contextlib.suppress(ValueError):
+                # x, y, z, charge, radius: the coordinates are read only to
+                # confirm the line really has the layout it is being read as.
+                numbers = [float(value) for value in fields[-5:]]
+                if np.isfinite(numbers).all():
+                    total += numbers[3]
     return total
 
 
@@ -290,6 +349,7 @@ def run_apbs(
     drop_water: bool = True,
     apbs_path: str | None = None,
     pdb2pqr_path: str | None = None,
+    timeout: float | None = DEFAULT_TIMEOUT,
 ) -> ApbsResult:
     """Solve the Poisson-Boltzmann equation for a structure.
 
@@ -322,6 +382,10 @@ def run_apbs(
         crystallographic waters are not part of the continuum solvent model.
     apbs_path, pdb2pqr_path : str, optional
         Explicit executables, overriding ``PATH`` and the environment.
+    timeout : float, optional
+        Seconds either program may run for before it is stopped. ``None``
+        waits indefinitely, which from inside Blender means a hung solver
+        holds the whole interface with nothing to press.
 
     Returns
     -------
@@ -332,7 +396,7 @@ def run_apbs(
     ApbsUnavailable
         If either program is missing.
     GalaError
-        If either program fails, or writes nothing to read.
+        If either program fails, times out, or writes nothing to read.
     ValueError
         If ``solver`` is not one of the two.
     """
@@ -355,7 +419,7 @@ def run_apbs(
     if drop_water:
         command.append("--drop-water")
     command += [os.path.abspath(pdb_path), pqr_path]
-    _run(command, workdir, "pdb2pqr.log")
+    _run(command, workdir, "pdb2pqr.log", timeout=timeout)
 
     if not os.path.exists(pqr_path):  # pragma: no cover - defensive
         raise GalaError(f"PDB2PQR wrote no PQR file; see {workdir}/pdb2pqr.log")
@@ -375,7 +439,7 @@ def run_apbs(
     with open(input_path, "w") as handle:
         handle.write(text)
 
-    _run([apbs, os.path.basename(input_path)], workdir, "apbs.log")
+    _run([apbs, os.path.basename(input_path)], workdir, "apbs.log", timeout=timeout)
 
     dx_path = _dx_path(text, workdir)
     if not os.path.exists(dx_path):  # pragma: no cover - defensive

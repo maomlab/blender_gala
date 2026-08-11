@@ -158,7 +158,12 @@ def set_origin_to_geometry(
     Raises
     ------
     StructureError
-        If ``target`` has no Blender object to move.
+        If ``target`` has no Blender object to move, or the object it names
+        has no geometry to centre on.
+    EmptySelectionError
+        If ``selection`` matches no atoms.
+    GalaError
+        If the geometry has non-finite coordinates.
     """
     bpy_mod = _require_bpy()
 
@@ -194,9 +199,30 @@ def set_origin_to_geometry(
         if method == "mass":
             masses = _atom_masses(structure)
             weights = masses[mask] if masses is not None else None
-    else:  # pragma: no cover - non-molecular objects
+    else:
+        # An empty, a camera and a light all reach here — they are objects, and
+        # they are not meshes — and each of them has no vertices to average.
+        # Asking anyway gives `'NoneType' object has no attribute 'vertices'`,
+        # which names neither the object nor what was wrong with it.
+        if getattr(getattr(obj, "data", None), "vertices", None) is None:
+            from ..core.exceptions import StructureError
+
+            raise StructureError(
+                f"set_origin_to_geometry needs geometry to centre on, and "
+                f"{obj.name!r} is {obj.type} with none. Pass a molecule or a "
+                "mesh object."
+            )
         local = _mesh_positions(obj)
         weights = None
+
+    if not np.isfinite(local).all():
+        from ..core.exceptions import GalaError
+
+        raise GalaError(
+            f"{obj.name!r} has non-finite coordinates, so it has no centre to "
+            "move its origin to; check the structure for nan or infinite atom "
+            "positions."
+        )
 
     centre_local = geometry_centre(local, method=method, weights=weights)
 

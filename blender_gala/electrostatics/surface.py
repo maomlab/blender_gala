@@ -111,17 +111,30 @@ class ElectrostaticSurface:
     def summary(self) -> str:
         """A readable block, for a vignette or the UI to print."""
         finite = self.potential[np.isfinite(self.potential)]
-        return "\n".join(
-            [
-                "Electrostatic surface",
-                f"  ramp     : -{self.ramp:g} to +{self.ramp:g} {self.grid.unit} "
-                "(red to blue)",
-                f"  surface  : {finite.min():+.2f} to {finite.max():+.2f} "
-                f"{self.grid.unit}, mean {finite.mean():+.2f}",
-                f"  beyond   : {(np.abs(finite) > self.ramp).mean() * 100:.1f}% of "
-                "atoms saturate the ramp",
-            ]
-        )
+        lines = [
+            "Electrostatic surface",
+            f"  ramp     : -{self.ramp:g} to +{self.ramp:g} {self.grid.unit} "
+            "(red to blue)",
+        ]
+        # No atom having a value at all is a real outcome — every atom buried,
+        # or a map that does not reach the structure — and the one method whose
+        # job is to report the result has to survive it. A range over nothing
+        # is numpy's "zero-size array to reduction operation minimum", which
+        # tells the reader nothing about their molecule.
+        if finite.size == 0:
+            lines.append(
+                f"  surface  : no value at any of {self.potential.size} atoms; "
+                "nothing was exposed to read the potential at"
+            )
+            return "\n".join(lines)
+
+        lines += [
+            f"  surface  : {finite.min():+.2f} to {finite.max():+.2f} "
+            f"{self.grid.unit}, mean {finite.mean():+.2f}",
+            f"  beyond   : {(np.abs(finite) > self.ramp).mean() * 100:.1f}% of "
+            "atoms saturate the ramp",
+        ]
+        return "\n".join(lines)
 
 
 def _fibonacci_sphere(count: int) -> np.ndarray:
@@ -159,7 +172,11 @@ def _accessible_points(
         first two dimensions saying which are accessible.
     """
     sphere = _fibonacci_sphere(count)
-    extended = radii + probe
+    # A probe negative enough to cancel an atom's radius reads at its centre,
+    # which is what the documentation offers a negative probe for. Left
+    # unclamped the sphere turns inside out, and its radius reaches biotite as
+    # a cell size that is not positive.
+    extended = np.maximum(radii + probe, 0.0)
     points = coordinates[:, None, :] + extended[:, None, None] * sphere[None, :, :]
     free = np.ones(points.shape[:2], dtype=bool)
 
@@ -169,9 +186,16 @@ def _accessible_points(
         return points, free
 
     reach = float(extended.max())
-    neighbours = CellList(array, cell_size=reach).get_atoms(
-        points.reshape(-1, 3), reach
-    )
+    if reach <= 0.0:
+        # Every sample point sits at its own atom's centre and no atom has any
+        # sphere left to cover one with, so there is nothing to search for.
+        return points, free
+
+    # The cell size is a performance choice, not part of the query: a probe
+    # that nearly cancels the radii leaves a reach of hundredths of an
+    # ångström, and cells that fine would tile the bounding box in billions.
+    cells = CellList(array, cell_size=max(reach, PROBE_RADIUS))
+    neighbours = cells.get_atoms(points.reshape(-1, 3), reach)
     if neighbours.ndim == 1:  # pragma: no cover - a single neighbour column
         neighbours = neighbours[:, None]
 
@@ -210,7 +234,9 @@ def potential_at_atoms(
         negative value large enough to cancel the radius reads at the atom's
         centre, which is inside the solute and is almost never what a surface
         figure wants — the field there is dominated by the atom's own partial
-        charge and saturates any sensible ramp.
+        charge and saturates any sensible ramp. The sample sphere stops at
+        zero radius, so a value more negative than that reads at the centre
+        too rather than turning the sphere inside out.
     outside : {"clamp", "nan"}, optional
         What to do with atoms whose sample point lies outside the grid.
     points : int, optional
@@ -226,14 +252,35 @@ def potential_at_atoms(
         Shape ``(n_atoms,)``, in the grid's units, ``nan`` where there is no
         surface.
 
+    Raises
+    ------
+    ValueError
+        If ``probe`` is not finite, or ``points`` is less than one — there is
+        no mean over no samples, and the all-``nan`` result it would otherwise
+        produce is indistinguishable from a wholly buried structure.
+
     Notes
     -----
     Coordinates come from the structure's own array, in ångström, not from the
     Blender mesh: APBS worked in the deposited frame, and the object may since
     have been moved, recentred or scaled.
     """
+    if not np.isfinite(probe):
+        raise ValueError(f"probe must be a finite distance in angstrom, got {probe!r}")
+    if not points >= 1:
+        raise ValueError(
+            f"points must be at least 1, got {points!r}: an atom's value is "
+            "the mean over its accessible sample points"
+        )
+
     structure = AtomStructure.from_any(target)
     coordinates = np.asarray(structure.array.coord, dtype=float)
+    if len(coordinates) == 0:
+        # No atoms is a legitimate structure to be handed — an empty selection
+        # written out — and an empty result says so. The neighbour search
+        # below would report it as a zero-size reduction instead.
+        return np.zeros(0)
+
     elements = [str(e).upper() for e in structure.array.element]
     radii = np.array([VDW_RADII.get(e, _DEFAULT_RADIUS) for e in elements])
 
