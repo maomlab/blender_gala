@@ -31,7 +31,7 @@ import numpy as np
 
 from . import attributes as gala_attributes
 from . import chemistry
-from .exceptions import SelectionSyntaxError
+from .exceptions import SelectionError, SelectionSyntaxError
 
 __all__ = [
     "LEVELS",
@@ -159,15 +159,65 @@ class SelectionContext:
         self._cache[key] = value
         return value
 
-    def upper(self, name: str) -> np.ndarray:
-        """Return an annotation as an upper-cased, stripped string array."""
-        key = f"upper:{name}"
+    def cached(self, key: str, build: Callable[[], np.ndarray]) -> np.ndarray:
+        """Return ``build()``'s result, computing it once per context.
+
+        The macros are plain functions rather than methods — they are a keyword
+        table — so this is how one of them keeps a derived array for as long as
+        :attr:`residue_key` keeps its own. Several macros ask for the same
+        derivation, and a selection asks for several macros.
+
+        Parameters
+        ----------
+        key : str
+            Cache key, unique across the whole module.
+        build : callable
+            Called with no arguments when nothing is cached under ``key``.
+
+        Returns
+        -------
+        numpy.ndarray
+        """
+        value = self._cache.get(key)
+        if value is None:
+            value = self._cache[key] = build()
+        return value
+
+    def strings(self, name: str) -> np.ndarray:
+        """Return an annotation as a stripped string array, case preserved.
+
+        Almost everything in the language folds case, so :meth:`upper` is what
+        most callers want. This is for the annotations whose case is *data*
+        rather than presentation: an mmCIF ``auth_asym_id`` is case-sensitive,
+        and using both cases is how an assembly gets past the 62 single
+        character identifiers, so a chain ``a`` is not the chain ``A``. Cached
+        beside the upper-cased form so that matching one way and then the other
+        stays two vectorised comparisons.
+
+        Parameters
+        ----------
+        name : str
+            Annotation name.
+
+        Returns
+        -------
+        numpy.ndarray
+            One string per atom; all empty when there is no such annotation.
+        """
+        key = f"str:{name}"
         if key not in self._cache:
             raw = self.annotation(name)
             if raw is None:
                 self._cache[key] = np.full(self.n_atoms, "", dtype="<U8")
             else:
-                self._cache[key] = np.char.upper(np.char.strip(raw.astype(str)))
+                self._cache[key] = np.char.strip(raw.astype(str))
+        return self._cache[key]
+
+    def upper(self, name: str) -> np.ndarray:
+        """Return an annotation as an upper-cased, stripped string array."""
+        key = f"upper:{name}"
+        if key not in self._cache:
+            self._cache[key] = np.char.upper(self.strings(name))
         return self._cache[key]
 
     @property
@@ -182,9 +232,15 @@ class SelectionContext:
 
     @property
     def residue_key(self) -> np.ndarray:
-        """Integer id that is constant within a residue and unique across them."""
+        """Integer id that is constant within a residue and unique across them.
+
+        The chain identifier goes in with its case intact: residue 1 of chain
+        ``A`` and residue 1 of chain ``a`` are two residues, and folding them
+        together would fuse them for ``byres`` and for every per-residue
+        detector downstream.
+        """
         if "residue_key" not in self._cache:
-            chain = self.upper("chain_id")
+            chain = self.strings("chain_id")
             res_id = self.annotation("res_id")
             ins = self.annotation("ins_code")
             if res_id is None:
@@ -199,9 +255,14 @@ class SelectionContext:
 
     @property
     def chain_key(self) -> np.ndarray:
-        """Integer id that is constant within a chain."""
+        """Integer id that is constant within a chain.
+
+        Case-sensitive, because the file is: ``bychain`` and
+        ``expand_selection(level="chain")`` must not grow a selection of chain
+        ``A`` into the separate chain ``a`` sitting beside it.
+        """
         if "chain_key" not in self._cache:
-            _, inverse = np.unique(self.upper("chain_id"), return_inverse=True)
+            _, inverse = np.unique(self.strings("chain_id"), return_inverse=True)
             self._cache["chain_key"] = inverse
         return self._cache["chain_key"]
 
@@ -450,22 +511,99 @@ class _Named(_Node):
         return mask
 
 
+#: Annotations whose case the file means, matched case-sensitively first.
+#:
+#: Only the identifier-like ones. A residue or an atom name is conventionally
+#: upper case and a file that mixes the two cases is not saying anything by it,
+#: so ``resn ala`` and ``name ca`` keep folding case unconditionally; a chain or
+#: segment identifier is a *label*, and mmCIF's ``auth_asym_id`` is where a
+#: large assembly puts ``a`` beside ``A`` deliberately.
+_CASE_SENSITIVE_ANNOTATIONS = frozenset({"chain_id"})
+
+
+def _match_pattern(values: np.ndarray, pattern: str) -> np.ndarray:
+    """Match one value-list entry, which may be a glob, against ``values``."""
+    if any(ch in pattern for ch in "*?["):
+        regex = re.compile(fnmatch.translate(pattern))
+        return np.array([bool(regex.match(v)) for v in values], dtype=bool)
+    return np.asarray(values == pattern, dtype=bool)
+
+
+def _require_annotation(ctx: SelectionContext, keyword: str, annotation: str) -> None:
+    """Refuse a keyword whose data this structure does not carry.
+
+    An annotation that is *there* and blank is an answer — no atom has an
+    insertion code — and matching nothing is right. An annotation that was
+    never attached is not: ``alt A`` on a structure read without
+    ``altloc="all"``, or ``charge`` on one read from mmCIF rather than PDB,
+    would otherwise return an empty mask on every structure, and a keyword
+    whose failure mode is silence is worse than one that fails.
+
+    Raises
+    ------
+    SelectionError
+        If ``annotation`` is absent from the structure.
+    """
+    if ctx.annotation(annotation) is not None:
+        return
+    raise SelectionError(
+        f"{keyword!r} reads the {annotation!r} annotation, which this structure "
+        "does not carry, so there is nothing to match against. Which annotations "
+        "a structure has depends on the file and on how it was read — formal "
+        "charges come from a PDB and not from an mmCIF, and no reader here asks "
+        "for alternate locations — and an empty answer would be "
+        "indistinguishable from one where no atom qualifies."
+    )
+
+
 @dataclass
 class _StringMatch(_Node):
-    """Match a string annotation against a ``+``/``,``-separated value list."""
+    """Match a string annotation against a ``+``/``,``-separated value list.
+
+    Values arrive as the user typed them. Matching folds case, because
+    ``resn ala`` is the same question as ``resn ALA`` — except for the
+    identifier-like annotations in :data:`_CASE_SENSITIVE_ANNOTATIONS`, which
+    are matched as typed first and folded only for a value that matched
+    nothing that way. That is what makes ``chain A`` mean the chain ``A`` on a
+    file that also has a chain ``a``, while ``chain d`` still finds the chain
+    ``D`` on a file that has only the one.
+    """
 
     annotation: str
     patterns: tuple[str, ...]
+    keyword: str = ""
 
     def evaluate(self, ctx: SelectionContext) -> np.ndarray:
-        values = ctx.upper(self.annotation)
+        # `element` is derived rather than read, so it is never absent: a file
+        # with no element column still has elements, off the atom names.
+        if self.annotation != "element":
+            _require_annotation(ctx, self.keyword, self.annotation)
+        if self.annotation in _CASE_SENSITIVE_ANNOTATIONS:
+            return self._match_as_typed(ctx)
+        values = _string_values(ctx, self.annotation)
         out = np.zeros(ctx.n_atoms, dtype=bool)
         for pattern in self.patterns:
-            if any(ch in pattern for ch in "*?["):
-                regex = re.compile(fnmatch.translate(pattern))
-                out |= np.array([bool(regex.match(v)) for v in values], dtype=bool)
-            else:
-                out |= values == pattern
+            out |= _match_pattern(values, pattern.upper())
+        return out
+
+    def _match_as_typed(self, ctx: SelectionContext) -> np.ndarray:
+        """Case-sensitively, falling back per value to the folded comparison.
+
+        Per value rather than for the list as a whole, so that ``chain A+d``
+        on a file holding ``A``, ``a`` and ``D`` reads the first exactly and
+        still finds the third. The fallback is a second vectorised comparison
+        against an array the context already caches, not a walk over atoms.
+        """
+        as_typed = ctx.strings(self.annotation)
+        folded: np.ndarray | None = None
+        out = np.zeros(ctx.n_atoms, dtype=bool)
+        for pattern in self.patterns:
+            hit = _match_pattern(as_typed, pattern)
+            if not hit.any():
+                if folded is None:
+                    folded = ctx.upper(self.annotation)
+                hit = _match_pattern(folded, pattern.upper())
+            out |= hit
         return out
 
 
@@ -476,12 +614,11 @@ class _IntRanges(_Node):
     annotation: str
     singles: tuple[int, ...]
     ranges: tuple[tuple[int | None, int | None], ...]
+    keyword: str = ""
 
     def evaluate(self, ctx: SelectionContext) -> np.ndarray:
-        values = ctx.annotation(self.annotation)
-        if values is None:
-            return np.zeros(ctx.n_atoms, dtype=bool)
-        values = np.asarray(values)
+        _require_annotation(ctx, self.keyword, self.annotation)
+        values = np.asarray(ctx.annotation(self.annotation))
         out = np.zeros(ctx.n_atoms, dtype=bool)
         if self.singles:
             out |= np.isin(values, np.asarray(self.singles))
@@ -536,12 +673,12 @@ class _NumericCompare(_Node):
     annotation: str
     operator: str
     value: float
+    keyword: str = ""
 
     def evaluate(self, ctx: SelectionContext) -> np.ndarray:
-        values = ctx.annotation(self.annotation)
-        if values is None:
-            return np.zeros(ctx.n_atoms, dtype=bool)
-        return _COMPARATORS[self.operator](np.asarray(values, dtype=float), self.value)
+        _require_annotation(ctx, self.keyword, self.annotation)
+        values = np.asarray(ctx.annotation(self.annotation), dtype=float)
+        return _COMPARATORS[self.operator](values, self.value)
 
 
 @dataclass
@@ -680,6 +817,15 @@ def _element_of(name: str) -> str:
 
 
 def _elements(ctx: SelectionContext) -> np.ndarray:
+    """Element symbols for every atom, derived from the names where absent.
+
+    Cached on the context: every element macro and the ``elem`` property ask
+    for this array, and deriving it walks the atom names in Python.
+    """
+    return ctx.cached("elements", lambda: _derive_elements(ctx))
+
+
+def _derive_elements(ctx: SelectionContext) -> np.ndarray:
     elements = ctx.upper("element")
     if np.any(elements != ""):
         return elements
@@ -698,24 +844,172 @@ def _elements(ctx: SelectionContext) -> np.ndarray:
     return np.where(ion, names, derived)
 
 
-def _flag_or(ctx: SelectionContext, name: str, fallback: np.ndarray) -> np.ndarray:
-    """Prefer a boolean annotation stored by Molecular Nodes, else compute it."""
+def _string_values(ctx: SelectionContext, annotation: str) -> np.ndarray:
+    """The strings a string-valued property is matched against.
+
+    ``element`` is the one property that is not simply an annotation. A file
+    with no element column still has elements, and the macros already read
+    them off the atom names; ``elem C`` and ``carbon`` are the same question,
+    so they have to be asked of the same array. Everything else is the
+    annotation itself.
+    """
+    if annotation == "element":
+        return _elements(ctx)
+    return ctx.upper(annotation)
+
+
+def _flag_or(
+    ctx: SelectionContext, name: str, fallback: Callable[[], np.ndarray]
+) -> np.ndarray:
+    """Prefer a boolean annotation stored by Molecular Nodes, else compute it.
+
+    ``fallback`` is a callable rather than an array because not every fallback
+    is cheap: working out whether an unnamed residue is a polymer means
+    grouping the structure by residue, which is wasted on a molecule that
+    arrived with the flags already on it.
+    """
     stored = ctx.annotation(name)
     if stored is not None and stored.dtype == bool:
         return np.asarray(stored, dtype=bool)
-    return fallback
+    return fallback()
+
+
+def _unclassified(ctx: SelectionContext) -> np.ndarray:
+    """Atoms of a polymer record whose residue name is in no table.
+
+    UNK, a modified nucleotide such as PSU, a residue from a forcefield nobody
+    has enumerated: without this they are matched by no macro at all, since
+    ``hetero`` prefers the file's own flag and the file says these are ATOM
+    records. Only ATOM records are candidates — a file that wrote HETATM has
+    already said the residue is not part of a chain, and taking it at its word
+    is what keeps a nucleotide-like ligand out of ``nucleic``.
+    """
+    return ctx.cached("unclassified", lambda: _find_unclassified(ctx))
+
+
+#: Every residue name some table in :mod:`.chemistry` claims, as one tuple so
+#: that deciding a name is in none of them is a single pass over the structure
+#: — this is asked of every atom before any polymer macro answers.
+_NAMED_RESIDUES = tuple(
+    sorted(
+        chemistry.AMINO_ACIDS
+        | chemistry.NUCLEOTIDES
+        | chemistry.SOLVENT_NAMES
+        | chemistry.MONOATOMIC_IONS
+    )
+)
+
+
+def _find_unclassified(ctx: SelectionContext) -> np.ndarray:
+    hetero = ctx.annotation("hetero")
+    if hetero is None or hetero.dtype != bool:
+        # Nothing says which records these were. `hetero` then falls back to
+        # `~polymer`, so an unknown residue is already reachable as a ligand.
+        return np.zeros(ctx.n_atoms, dtype=bool)
+    known = np.isin(_res_names(ctx), _NAMED_RESIDUES)
+    return ~known & ~np.asarray(hetero, dtype=bool)
+
+
+def _residue_has(ctx: SelectionContext, name: str) -> np.ndarray:
+    """Mask of the atoms whose residue carries an atom named ``name``.
+
+    Grouping the whole structure by residue is the expensive part, so it goes
+    through :attr:`SelectionContext.residue_key` — shared with ``byres``, with
+    the expansions and with the interaction detectors — rather than a grouping
+    of its own, and it is only ever reached for a structure that has a residue
+    no table knows.
+    """
+
+    def build() -> np.ndarray:
+        keys = ctx.residue_key
+        if keys.size == 0:
+            return np.zeros(ctx.n_atoms, dtype=bool)
+        n_residues = int(keys.max()) + 1
+        counts = np.bincount(keys[_atom_names(ctx) == name], minlength=n_residues)
+        return (counts > 0)[keys]
+
+    return ctx.cached(f"residue_has:{name}", build)
+
+
+def _unnamed_peptide(ctx: SelectionContext) -> np.ndarray:
+    """Unclassified residues built like an amino acid.
+
+    An alpha carbon beside a mainchain nitrogen or carbonyl. ``CA`` is not a
+    ligand atom name — in the chemical component dictionary it belongs to the
+    calcium ion, whose residue has no other atom — so the pair is specific
+    enough to read, and asking for no more than a pair catches the partly
+    modelled UNK that a low-resolution structure is full of.
+    """
+
+    def build() -> np.ndarray:
+        unclassified = _unclassified(ctx)
+        if not unclassified.any():
+            return np.zeros(ctx.n_atoms, dtype=bool)
+        mainchain = (
+            _residue_has(ctx, "N") | _residue_has(ctx, "C") | _residue_has(ctx, "O")
+        )
+        return unclassified & _residue_has(ctx, "CA") & mainchain
+
+    return ctx.cached("unnamed_peptide", build)
+
+
+def _unnamed_nucleotide(ctx: SelectionContext) -> np.ndarray:
+    """Unclassified residues built like a nucleotide.
+
+    The 5' phosphate-to-sugar link, which is what joins one nucleotide to the
+    next. A nucleotide-*like* ligand — ATP, AMP — carries it too, which is why
+    only an atom the file itself wrote as part of a chain is asked.
+    """
+
+    def build() -> np.ndarray:
+        unclassified = _unclassified(ctx)
+        if not unclassified.any():
+            return np.zeros(ctx.n_atoms, dtype=bool)
+        return (
+            unclassified
+            & _residue_has(ctx, "P")
+            & _residue_has(ctx, "O5'")
+            & _residue_has(ctx, "C5'")
+        )
+
+    return ctx.cached("unnamed_nucleotide", build)
+
+
+def _peptide_residues(ctx: SelectionContext) -> np.ndarray:
+    return np.isin(_res_names(ctx), list(chemistry.AMINO_ACIDS)) | _unnamed_peptide(ctx)
+
+
+def _nucleotide_residues(ctx: SelectionContext) -> np.ndarray:
+    return np.isin(_res_names(ctx), list(chemistry.NUCLEOTIDES)) | _unnamed_nucleotide(
+        ctx
+    )
 
 
 def _macro_protein(ctx: SelectionContext) -> np.ndarray:
-    return _flag_or(
-        ctx, "is_peptide", np.isin(_res_names(ctx), list(chemistry.AMINO_ACIDS))
-    )
+    return _flag_or(ctx, "is_peptide", lambda: _peptide_residues(ctx))
 
 
 def _macro_nucleic(ctx: SelectionContext) -> np.ndarray:
-    return _flag_or(
-        ctx, "is_nucleic", np.isin(_res_names(ctx), list(chemistry.NUCLEOTIDES))
-    )
+    return _flag_or(ctx, "is_nucleic", lambda: _nucleotide_residues(ctx))
+
+
+#: The deoxyribonucleotides among :data:`chemistry.NUCLEOTIDES`: the `D`-prefixed
+#: names and their `D*3`/`D*5` terminal forms, plus thymine written the old way.
+#: Everything else in the table — the bare and `R`-prefixed names — is RNA.
+_DNA_RESIDUES = frozenset(
+    name
+    for name in chemistry.NUCLEOTIDES
+    if name.startswith("D") or name in ("T", "THY")
+)
+_RNA_RESIDUES = frozenset(chemistry.NUCLEOTIDES) - _DNA_RESIDUES
+
+
+def _macro_dna(ctx: SelectionContext) -> np.ndarray:
+    return _macro_nucleic(ctx) & np.isin(_res_names(ctx), list(_DNA_RESIDUES))
+
+
+def _macro_rna(ctx: SelectionContext) -> np.ndarray:
+    return _macro_nucleic(ctx) & np.isin(_res_names(ctx), list(_RNA_RESIDUES))
 
 
 def _macro_polymer(ctx: SelectionContext) -> np.ndarray:
@@ -724,7 +1018,9 @@ def _macro_polymer(ctx: SelectionContext) -> np.ndarray:
 
 def _macro_solvent(ctx: SelectionContext) -> np.ndarray:
     return _flag_or(
-        ctx, "is_solvent", np.isin(_res_names(ctx), list(chemistry.SOLVENT_NAMES))
+        ctx,
+        "is_solvent",
+        lambda: np.isin(_res_names(ctx), list(chemistry.SOLVENT_NAMES)),
     )
 
 
@@ -732,7 +1028,7 @@ def _macro_hetero(ctx: SelectionContext) -> np.ndarray:
     stored = ctx.annotation("hetero")
     if stored is not None and stored.dtype == bool:
         return np.asarray(stored, dtype=bool)
-    return _flag_or(ctx, "is_hetero", ~_macro_polymer(ctx))
+    return _flag_or(ctx, "is_hetero", lambda: ~_macro_polymer(ctx))
 
 
 def _macro_backbone(ctx: SelectionContext) -> np.ndarray:
@@ -804,7 +1100,9 @@ def _macro_aromatic(ctx: SelectionContext) -> np.ndarray:
 
 def _macro_alpha_carbon(ctx: SelectionContext) -> np.ndarray:
     return _flag_or(
-        ctx, "is_alpha_carbon", _macro_protein(ctx) & (_atom_names(ctx) == "CA")
+        ctx,
+        "is_alpha_carbon",
+        lambda: _macro_protein(ctx) & (_atom_names(ctx) == "CA"),
     )
 
 
@@ -815,8 +1113,8 @@ MACRO_KEYWORDS: dict[str, Callable[[SelectionContext], np.ndarray]] = {
     "peptide": _macro_protein,
     "polymer": _macro_polymer,
     "nucleic": _macro_nucleic,
-    "dna": _macro_nucleic,
-    "rna": _macro_nucleic,
+    "dna": _macro_dna,
+    "rna": _macro_rna,
     "backbone": _macro_backbone,
     "bb": _macro_backbone,
     "sidechain": _macro_sidechain,
@@ -1139,8 +1437,12 @@ class _Parser:
             ) from exc
 
     def _values(self, token: _Token) -> tuple[str, ...]:
-        """The upper-cased values of a ``+``/``,``-separated value list."""
-        return tuple(v.upper() for v in _split_values(token.text, token, self.text))
+        """The values of a ``+``/``,``-separated value list, as they were typed.
+
+        Case is folded when the value is matched rather than here, because for
+        a chain identifier the case the user typed is part of the question.
+        """
+        return tuple(_split_values(token.text, token, self.text))
 
     def _parse_property(self, word: str, token: _Token) -> _Node:
         annotation, kind = PROPERTY_KEYWORDS[word]
@@ -1158,9 +1460,11 @@ class _Parser:
             operator = comparison.text
             if kind == "str":
                 if operator in ("=", "=="):
-                    return _StringMatch(annotation, self._values(value_token))
+                    return _StringMatch(annotation, self._values(value_token), word)
                 if operator in ("!=", "<>"):
-                    return _Not(_StringMatch(annotation, self._values(value_token)))
+                    return _Not(
+                        _StringMatch(annotation, self._values(value_token), word)
+                    )
                 raise SelectionSyntaxError(
                     f"{word!r} does not support the {operator!r} operator",
                     self.text,
@@ -1174,7 +1478,7 @@ class _Parser:
                     self.text,
                     value_token.pos,
                 ) from exc
-            return _NumericCompare(annotation, operator, number)
+            return _NumericCompare(annotation, operator, number, word)
 
         peeked = self.peek()
         if peeked is None or peeked.kind != "word":
@@ -1183,7 +1487,7 @@ class _Parser:
         value_token = self.next()
 
         if kind == "str":
-            return _StringMatch(annotation, self._values(value_token))
+            return _StringMatch(annotation, self._values(value_token), word)
         if kind == "float":
             try:
                 number = float(value_token.text)
@@ -1193,12 +1497,12 @@ class _Parser:
                     self.text,
                     value_token.pos,
                 ) from exc
-            return _NumericCompare(annotation, "=", number)
+            return _NumericCompare(annotation, "=", number, word)
 
         singles, ranges = _parse_int_values(value_token.text, value_token, self.text)
         if annotation in ("__index__", "__rank__"):
             return _IndexRanges(singles, ranges, one_based=(annotation == "__index__"))
-        return _IntRanges(annotation, singles, ranges)
+        return _IntRanges(annotation, singles, ranges, word)
 
 
 # ---------------------------------------------------------------------------
@@ -1528,8 +1832,15 @@ def describe_selection(
 
 
 def _describe_by_chain(ctx: SelectionContext, mask: np.ndarray) -> str | None:
-    """Describe a mask chain by chain, or ``None`` if it cannot be."""
-    chains = ctx.upper("chain_id")
+    """Describe a mask chain by chain, or ``None`` if it cannot be.
+
+    Chain identifiers are read and written with their case intact. Naming a
+    chain ``a`` as ``chain A`` would describe the *other* chain on a file that
+    has both, which the verification in :func:`describe_selection` would catch
+    — but only by falling back to the positional form for a structure that can
+    perfectly well be named.
+    """
+    chains = ctx.strings("chain_id")
     raw_res_ids = ctx.annotation("res_id")
     if raw_res_ids is None:
         return None

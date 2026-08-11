@@ -11,12 +11,19 @@ in the ``charge`` annotation, where every backbone carbonyl carbon reads around
 +0.6. Treating those as formal charges makes a salt-bridge detector fire on
 every residue in the protein, so this module ignores them entirely and derives
 formal charge from connectivity instead.
+
+A note on alternate conformations: a high-resolution structure routinely models
+one residue in two positions, distinguished by an ``altloc_id`` annotation and
+partial occupancies. Those are two positions of *one* atom, not two atoms, and
+a ring or a charged group built from both spans them: its centroid and its
+plane belong to neither conformer. :func:`primary_conformer` picks one, and
+every perceived group is built from that one alone.
 """
 
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Container, Sequence
 
 import numpy as np
 
@@ -29,6 +36,7 @@ __all__ = [
     "bond_graph",
     "charged_groups",
     "find_rings",
+    "primary_conformer",
 ]
 
 #: Covalent radii in ångström (Cordero et al. 2008), used for bond perception.
@@ -76,10 +84,116 @@ _PLANE_EXTENT = 0.05
 _NON_BONDING = frozenset(chemistry.METALS) - {"AL", "SI"}
 
 
+#: Altloc values that mean "this atom is in every conformation": the PDB's
+#: blank column, and mmCIF's two ways of writing an absent value.
+_NO_ALTLOC = ("", ".", "?")
+
+
 def _elements(structure: AtomStructure) -> np.ndarray:
     from ..core.selection import _elements as element_array
 
     return element_array(structure.context)
+
+
+def primary_conformer(structure: AtomStructure) -> np.ndarray:
+    """Return a mask of the atoms making up the conformation to be measured.
+
+    Where a residue is modelled in alternate locations, the atoms of one name
+    are the same atom seen twice, and the whole structure has to be read as one
+    conformer or the other. This picks, for each residue and atom name, the
+    highest-occupancy alternate location — the conformer the deposition itself
+    considers most of the crystal — breaking a tie by the altloc identifier, so
+    that ``A`` at 0.5 wins over ``B`` at 0.5 and the choice is the same one
+    every time.
+
+    The minor conformer is therefore not measured at all. That is deliberate:
+    reporting both gives two records for one interaction, with byte-identical
+    labels, two dashes drawn over each other and a doubled count in a caption.
+
+    Atoms carrying no altloc identifier are always kept, including two atoms of
+    a residue that share a name with no altloc between them — a repeated ATOM
+    record is a deposition error rather than a conformer, and there is nothing
+    here to choose between the copies by.
+
+    Parameters
+    ----------
+    structure : AtomStructure
+        Structure to analyse.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask over the atoms. All true when nothing carries an altloc,
+        which is the usual case and costs one comparison.
+    """
+    context = structure.context
+    keep = np.ones(structure.n_atoms, dtype=bool)
+
+    # The detectors ask this of every selection they resolve, so the structure
+    # that has no altlocs at all — most of them, and every one that came from a
+    # reader that resolved them — settles it on a cached lookup rather than on
+    # a comparison over every atom.
+    if context.annotation("altloc_id") is None:
+        return keep
+
+    # The blank column is the overwhelmingly common value, so it is tested on
+    # its own — one comparison over the array — and the mmCIF spellings of the
+    # same thing only when something is left.
+    altloc = context.upper("altloc_id")
+    lettered = altloc != ""
+    if lettered.any():
+        lettered &= ~np.isin(altloc, _NO_ALTLOC)
+    if not lettered.any():
+        return keep
+
+    # Only residues that carry an altloc can have a conformer to choose, so the
+    # per-atom work below is bounded by those rather than by the structure.
+    residues = context.residue_key
+    affected = np.flatnonzero(np.isin(residues, np.unique(residues[lettered])))
+
+    names = context.upper("atom_name")
+    occupancy = context.annotation("occupancy")
+    if occupancy is None:  # nothing to rank by; the altloc identifier decides
+        occupancy = np.ones(structure.n_atoms)
+    occupancy = np.nan_to_num(np.asarray(occupancy, dtype=float), nan=0.0)
+
+    positions: dict[tuple[int, str], list[int]] = {}
+    for atom in affected:
+        positions.setdefault((int(residues[atom]), str(names[atom])), []).append(
+            int(atom)
+        )
+
+    for members in positions.values():
+        if len(members) < 2 or not lettered[members].any():
+            continue
+        best = min(members, key=lambda i: (-occupancy[i], str(altloc[i]), i))
+        keep[members] = False
+        keep[best] = True
+    return keep
+
+
+def _named_atoms(
+    member: np.ndarray,
+    atom_names: np.ndarray,
+    keep: np.ndarray,
+    wanted: Container[str],
+) -> tuple[int, ...]:
+    """The residue's atoms named in ``wanted``, at most one per name.
+
+    A table says how many atoms a ring or a charged group has, so more matches
+    than names means the residue carries the group twice: an alternate
+    conformation, or a repeated ATOM record. Either way the extra match is a
+    second position of an atom already in the group, and a centroid or a plane
+    fitted across both belongs to neither position — so the group is built from
+    :func:`primary_conformer`'s reading, and a name that still matches twice
+    keeps the first match rather than fusing the two.
+    """
+    picked: dict[str, int] = {}
+    for index in member:
+        name = atom_names[index]
+        if name in wanted and keep[index]:
+            picked.setdefault(str(name), int(index))
+    return tuple(picked.values())
 
 
 def bond_graph(
@@ -271,6 +385,11 @@ def aromatic_rings(structure: AtomStructure) -> list[tuple[int, ...]]:
     aromaticity here because a saturated ring of the same size puckers well
     beyond that.
 
+    A residue modelled in alternate conformations gives one ring, not two fused
+    into one and not none: the ring is built from :func:`primary_conformer`'s
+    atoms, so a real stacking interaction is still reported for a residue whose
+    altlocs nothing upstream merged.
+
     Parameters
     ----------
     structure : AtomStructure
@@ -286,6 +405,7 @@ def aromatic_rings(structure: AtomStructure) -> list[tuple[int, ...]]:
     atom_names = structure.context.upper("atom_name")
     residues = structure.context.residue_key
     elements = _elements(structure)
+    keep = primary_conformer(structure)
 
     rings: list[tuple[int, ...]] = []
     tabled = np.zeros(structure.n_atoms, dtype=bool)
@@ -299,16 +419,18 @@ def aromatic_rings(structure: AtomStructure) -> list[tuple[int, ...]]:
             continue
         tabled[member] = True
         for ring_names in table:
-            members = tuple(int(i) for i in member if atom_names[i] in ring_names)
-            # One atom short is still a usable ring; more atoms than the ring
-            # has names means the residue carries two conformers of it —
-            # unmerged altlocs, which PDB files have routinely — and a
-            # centroid and plane fitted across both belong to neither.
-            if len(ring_names) - 1 <= len(members) <= len(ring_names):
+            members = _named_atoms(member, atom_names, keep, ring_names)
+            # One atom short is still a usable ring — a missing CZ leaves five
+            # atoms that describe the same plane. Fewer than that is not the
+            # ring the table names, and geometric perception below cannot help
+            # either, because the residue has been marked as handled.
+            if len(members) >= len(ring_names) - 1:
                 rings.append(members)
 
-    # Geometric perception for everything the tables did not cover.
-    remaining = np.flatnonzero(~tabled & np.isin(elements, ["C", "N", "O", "S"]))
+    # Geometric perception for everything the tables did not cover, reading the
+    # same single conformer: two conformers of a ligand ring are close enough
+    # to bond to each other and would perceive as one twelve-membered system.
+    remaining = np.flatnonzero(~tabled & keep & np.isin(elements, ["C", "N", "O", "S"]))
     if remaining.size >= 5:
         for ring in find_rings(structure, sizes=(5, 6), subset=remaining):
             if _is_planar(coord[list(ring)]):
@@ -337,6 +459,10 @@ def charged_groups(structure: AtomStructure, positive: bool) -> list[tuple[int, 
       planar arrangement), and quaternary nitrogen (N with four heavy
       neighbours).
 
+    A group is built from one conformer (see :func:`primary_conformer`). Fusing
+    two conformers of a carboxylate would put its centroid between them, and a
+    salt bridge measured to that centroid is a distance no conformer occupies.
+
     Parameters
     ----------
     structure : AtomStructure
@@ -354,6 +480,7 @@ def charged_groups(structure: AtomStructure, positive: bool) -> list[tuple[int, 
     atom_names = structure.context.upper("atom_name")
     residues = structure.context.residue_key
     elements = _elements(structure)
+    keep = primary_conformer(structure)
 
     groups: list[tuple[int, ...]] = []
     tabled = np.zeros(structure.n_atoms, dtype=bool)
@@ -370,11 +497,11 @@ def charged_groups(structure: AtomStructure, positive: bool) -> list[tuple[int, 
             tabled[member] = True
             names = table.get(res_name)
             if names is not None:
-                members = tuple(int(i) for i in member if atom_names[i] in names)
+                members = _named_atoms(member, atom_names, keep, names)
                 if members:
                     groups.append(members)
 
-    remaining = np.flatnonzero(~tabled)
+    remaining = np.flatnonzero(~tabled & keep)
     if remaining.size == 0:
         return groups
 

@@ -73,11 +73,27 @@ class AtomStructure:
     molecule: Any = None
     frame: int = 0
 
+    def __post_init__(self) -> None:
+        """Reduce a stack to the one model this structure is about.
+
+        The reduction used to happen in :meth:`from_any` alone, so a directly
+        constructed structure over an ``AtomArrayStack`` reported the *model*
+        count as its atom count and read one model through :attr:`coord` and
+        another through :attr:`context`. The constructor is public, so it has
+        to keep the same promise the factory does.
+        """
+        reduced = _single_model(self.array, self.frame)
+        # The stack itself is kept: once the reduction has happened `frame` is
+        # only a record of where the atoms came from, and `at_frame` needs the
+        # other models to be able to honour a request for one of them.
+        self._models = self.array if reduced is not self.array else None
+        self.array = reduced
+
     # ------------------------------------------------------------------
     # Construction
     # ------------------------------------------------------------------
     @classmethod
-    def from_any(cls, source: Any, frame: int = 0) -> AtomStructure:
+    def from_any(cls, source: Any, frame: int | None = None) -> AtomStructure:
         """Build an :class:`AtomStructure` from whatever the caller had.
 
         Parameters
@@ -86,7 +102,12 @@ class AtomStructure:
             The thing to adapt. A Blender object is resolved back to its
             Molecular Nodes entity through the MN session.
         frame : int, optional
-            Model index for multi-model structures.
+            Model index for multi-model structures. ``None``, the default,
+            means *whichever model this already is*: a structure that arrives
+            already built comes back untouched, and anything else is read at
+            model 0. Naming a frame is a request, and one that cannot be met —
+            a structure with no other model to read — is refused rather than
+            ignored.
 
         Returns
         -------
@@ -95,19 +116,22 @@ class AtomStructure:
         Raises
         ------
         StructureError
-            If ``source`` cannot be interpreted as a molecular structure.
+            If ``source`` cannot be interpreted as a molecular structure, or
+            ``frame`` is not one of its models.
         """
         if isinstance(source, AtomStructure):
-            return source
+            return source if frame is None else source.at_frame(frame)
+
+        index = 0 if frame is None else frame
 
         if mn_bridge.is_molecule(source):
-            return cls._from_molecule(source, frame)
+            return cls._from_molecule(source, index)
 
         if bpy is not None and isinstance(source, bpy.types.Object):
-            return cls._from_object(source, frame)
+            return cls._from_object(source, index)
 
         if hasattr(source, "coord") and hasattr(source, "element"):
-            return cls(array=_single_model(source, frame), frame=frame)
+            return cls(array=source, frame=index)
 
         raise StructureError(
             f"cannot interpret {type(source).__name__} as a molecular structure. "
@@ -121,7 +145,7 @@ class AtomStructure:
         if array is None:
             raise StructureError("Molecular Nodes entity has no atom array")
         return cls(
-            array=_single_model(array, frame),
+            array=array,
             object=getattr(molecule, "object", None),
             molecule=molecule,
             frame=frame,
@@ -138,6 +162,42 @@ class AtomStructure:
             f"object {obj.name!r} is not tracked by Molecular Nodes, so its "
             "chemistry is unavailable. Re-import the structure with Molecular "
             "Nodes, or pass the biotite AtomArray directly."
+        )
+
+    def at_frame(self, frame: int) -> AtomStructure:
+        """Return this structure read at another model index.
+
+        Parameters
+        ----------
+        frame : int
+            Model index.
+
+        Returns
+        -------
+        AtomStructure
+            ``self`` when it is already at ``frame``, otherwise a new structure
+            over the same models, the same Blender object and the same entity.
+
+        Raises
+        ------
+        StructureError
+            If there is no such model, or none to choose from at all.
+        """
+        if frame == self.frame:
+            return self
+        models = self._models
+        if models is None:
+            # A structure built from a molecule keeps the entity, whose array
+            # may still hold every model even though this one does not.
+            models = getattr(self.molecule, "array", None)
+        coord = getattr(models, "coord", None)
+        if coord is None or np.asarray(coord).ndim != 3:
+            raise StructureError(
+                f"{self.name!r} was built from a single model, so frame {frame} "
+                "cannot be read from it"
+            )
+        return AtomStructure(
+            array=models, object=self.object, molecule=self.molecule, frame=frame
         )
 
     # ------------------------------------------------------------------
