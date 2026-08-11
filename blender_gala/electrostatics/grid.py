@@ -91,7 +91,9 @@ class PotentialGrid:
         Returns
         -------
         numpy.ndarray
-            Shape ``(n,)``.
+            Shape ``(n,)``. A point that is not a position — an atom carrying
+            ``nan``, or any point at all when the grid has a zero step — reads
+            as ``nan`` rather than as a value from somewhere.
 
         Raises
         ------
@@ -109,7 +111,13 @@ class PotentialGrid:
         counts = np.asarray(self.shape)
         beyond = (fractional < 0).any(axis=1) | (fractional > counts - 1).any(axis=1)
 
-        clamped = np.clip(fractional, 0.0, counts - 1.0)
+        # Casting a non-finite float to an integer is undefined, and the two
+        # platforms this runs on disagree: x86-64 gives INT64_MIN, which indexes
+        # out of the array, while arm64 saturates to zero, which quietly reads a
+        # corner of the box. Neither is an answer, so such points are held out
+        # of the arithmetic and marked at the end.
+        placed = np.isfinite(fractional).all(axis=1)
+        clamped = np.clip(np.where(placed[:, None], fractional, 0.0), 0.0, counts - 1.0)
         lower = np.floor(clamped).astype(int)
         # The last node has no cell above it, so a point exactly on the far
         # face has to interpolate within the cell below it instead.
@@ -125,6 +133,7 @@ class PotentialGrid:
 
         if outside == "nan":
             result[beyond] = np.nan
+        result[~placed] = np.nan
         return result
 
     def summary(self) -> str:

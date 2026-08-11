@@ -619,9 +619,28 @@ def test_sampling_far_outside_the_box_clamps_or_marks(grid):
     assert np.isnan(grid.sample(far, outside="nan")).all()
 
 
-def test_sampling_at_an_undefined_point_does_not_raise(grid):
-    """An atom whose coordinate is nan asks for a potential at nowhere."""
-    assert np.isnan(grid.sample(np.array([[np.nan, 0.0, 0.0]]))).all()
+@pytest.mark.parametrize("broken", [np.nan, np.inf, -np.inf])
+@pytest.mark.parametrize("outside", ["clamp", "nan"])
+def test_sampling_at_an_undefined_point_does_not_raise(grid, broken, outside):
+    """An atom whose coordinate is not a number asks for a potential nowhere.
+
+    This has to be checked rather than left to the arithmetic, because casting
+    a non-finite float to an integer is undefined and the platforms disagree:
+    x86-64 gives ``INT64_MIN``, which indexes out of the array, and arm64
+    saturates to zero, which quietly reads a corner of the box. A test that
+    only ran on one of them would have passed either way.
+    """
+    assert np.isnan(grid.sample(np.array([[broken, 0.0, 0.0]]), outside=outside)).all()
+
+
+@pytest.mark.parametrize("broken", [np.nan, np.inf])
+def test_one_atom_without_a_position_does_not_poison_the_rest(grid, broken):
+    values = grid.sample(
+        np.array([[0.0, 0.0, 0.0], [broken, 0.0, 0.0], [1.0, 1.0, 1.0]])
+    )
+
+    assert np.isnan(values[1])
+    assert np.isfinite(values[[0, 2]]).all()
 
 
 def test_sampling_a_single_node_grid_returns_its_value():
