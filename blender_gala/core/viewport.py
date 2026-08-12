@@ -14,6 +14,10 @@ Both directions work in Edit Mode and Object Mode. The distinction matters:
 while a mesh is open in Edit Mode its selection flags live in the BMesh and
 the copies on ``mesh.vertices`` are stale, so reading them there would return
 whatever was selected when the mode was last toggled.
+
+This is also where Gala asks whether a Blender object is still *there*
+(:func:`is_removed`, :func:`require_object`), since deleting the molecule is
+the state every other module has to have an answer for.
 """
 
 from __future__ import annotations
@@ -24,13 +28,86 @@ from typing import Any
 
 import numpy as np
 
+from .exceptions import StructureError
+
 __all__ = [
+    "is_removed",
     "is_selectable",
     "object_mode",
     "read_selection",
+    "require_object",
     "selected_indices",
     "write_selection",
 ]
+
+
+def is_removed(obj: Any) -> bool:
+    """Whether ``obj`` is a Blender datablock that has since been deleted.
+
+    Deleting an object — one press of X in the outliner, an undo of an import,
+    a scene reload — leaves every Python reference to it pointing at a
+    ``StructRNA`` that Blender has unlinked. *Any* attribute access on it then
+    raises ``ReferenceError``, which is not an ``AttributeError``, so no
+    ``getattr`` default applies and no ordinary liveness test works: the only
+    way to ask is to touch it and see.
+
+    Parameters
+    ----------
+    obj : bpy.types.Object or None
+        Whatever the caller is holding. ``None``, a biotite array or anything
+        else that was never a Blender datablock has not been deleted, so the
+        answer for those is ``False``.
+
+    Returns
+    -------
+    bool
+    """
+    if obj is None:
+        return False
+    try:
+        # The access is the test; the value is of no interest.
+        _ = obj.name
+    except ReferenceError:
+        return True
+    except Exception:
+        # Not a Blender datablock at all, or one whose name is unreadable for
+        # some other reason. Either way nothing was deleted out from under us.
+        pass
+    return False
+
+
+def require_object(obj: Any, name: str | None = None) -> Any:
+    """Return ``obj``, refusing when it is a Blender object that is gone.
+
+    Parameters
+    ----------
+    obj : bpy.types.Object or None
+        The object an operation is about to use. ``None`` is passed through —
+        having no object at all is a state several callers handle themselves,
+        and only a *deleted* one is an error.
+    name : str, optional
+        What the object was called, remembered from before it was deleted;
+        reading ``obj.name`` is exactly what raises once it is gone.
+
+    Returns
+    -------
+    bpy.types.Object or None
+        ``obj`` unchanged.
+
+    Raises
+    ------
+    StructureError
+        If ``obj`` has been deleted.
+    """
+    if not is_removed(obj):
+        return obj
+    label = repr(name) if name else "this structure's Blender object"
+    raise StructureError(
+        f"the Blender object {label} has been deleted, so there is no geometry, "
+        "viewport selection or stored selection left to read. Re-import the "
+        "structure; the chemistry already read from it — atom count, "
+        "coordinates, labels — is still answerable."
+    )
 
 
 @contextlib.contextmanager
@@ -47,6 +124,10 @@ def object_mode(obj: Any) -> Iterator[None]:
     Leaving and re-entering Edit Mode preserves the vertex selection, so the
     round trip is invisible apart from the viewport blinking.
     """
+    # Reading the mode of a deleted object raises Blender's own ReferenceError,
+    # and this is a context manager: the caller would be left with a traceback
+    # from the `with` line rather than a message about the missing molecule.
+    require_object(obj)
     # Annotated because `obj` is untyped: Blender's own `mode_set` takes a
     # literal, and whatever an object reports as its mode is one at runtime.
     mode: Any = getattr(obj, "mode", "OBJECT")
@@ -77,8 +158,15 @@ def object_mode(obj: Any) -> Iterator[None]:
 
 
 def is_selectable(obj: Any) -> bool:
-    """Whether ``obj`` is a mesh whose vertices Gala can read a selection from."""
-    return obj is not None and getattr(obj, "type", None) == "MESH"
+    """Whether ``obj`` is a mesh whose vertices Gala can read a selection from.
+
+    A deleted object is not selectable rather than an error: this is a
+    predicate, and the functions that go on to *use* the object say so
+    themselves through :func:`require_object`.
+    """
+    if obj is None or is_removed(obj):
+        return False
+    return getattr(obj, "type", None) == "MESH"
 
 
 def read_selection(obj: Any, n_atoms: int | None = None) -> np.ndarray:
@@ -89,16 +177,29 @@ def read_selection(obj: Any, n_atoms: int | None = None) -> np.ndarray:
     obj : bpy.types.Object
         A mesh object, usually a molecule imported by Molecular Nodes.
     n_atoms : int, optional
-        Expected length. When the mesh no longer has one vertex per atom — a
-        style that changes the point count, an edit that added geometry — an
-        all-false mask of the requested length is returned rather than one
-        that would address the wrong atoms.
+        Expected length. When the mesh no longer has one vertex per atom — an
+        edit that added or removed geometry — the selection is refused rather
+        than returned, since it would address the wrong atoms.
 
     Returns
     -------
     numpy.ndarray
         Boolean mask, empty when there is nothing to read.
+
+    Raises
+    ------
+    StructureError
+        If ``obj`` has been deleted. An all-false mask would say that nothing
+        is selected, which is a different — and wrong — answer from "the
+        object this selection was on is gone".
+
+        Or if the mesh has a vertex count other than ``n_atoms``. The mask read
+        off the mesh is correct about the *mesh*; what cannot be done is to say
+        which atoms it names, and "nothing is selected" is a valid-looking
+        answer that is false — the sibling paths here already refuse a mask of
+        the wrong length rather than pad it.
     """
+    require_object(obj)
     if not is_selectable(obj):
         return np.zeros(0 if n_atoms is None else n_atoms, dtype=bool)
 
@@ -113,7 +214,12 @@ def read_selection(obj: Any, n_atoms: int | None = None) -> np.ndarray:
         vertices.foreach_get("select", flags)
 
     if n_atoms is not None and len(flags) != n_atoms:
-        return np.zeros(n_atoms, dtype=bool)
+        raise StructureError(
+            f"the mesh of {getattr(obj, 'name', obj)!r} has {len(flags)} vertices "
+            f"but the structure has {n_atoms} atoms, so what is selected in the "
+            "viewport cannot be read as atoms. Undo the edit that added or "
+            "removed vertices, or re-import the structure."
+        )
     return flags
 
 
@@ -127,9 +233,12 @@ def write_selection(obj: Any, mask: np.ndarray) -> None:
 
     Raises
     ------
+    StructureError
+        If ``obj`` has been deleted.
     ValueError
         If ``obj`` has no mesh, or ``mask`` is not one value per vertex.
     """
+    require_object(obj)
     if not is_selectable(obj):
         raise ValueError(f"object {getattr(obj, 'name', obj)!r} is not a mesh")
 

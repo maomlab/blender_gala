@@ -69,6 +69,43 @@ class SetupReport:
         return "\n".join(lines)
 
 
+def _no_subject_reason(target: Any, structure: AtomStructure | None) -> str:
+    """Why there is no molecule to build the scene around, in the user's terms.
+
+    "Skipped" on its own is not actionable: from the panel the user chose
+    nothing and was told nothing, and the two ways of arriving here — nothing
+    to work from, and something that turned out not to have a molecule behind
+    it — need different things done about them.
+    """
+    if structure is not None:
+        return "the structure given has no Blender object"
+    if target is not None:
+        return "the target could not be read as a structure"
+
+    loaded = _molecules_in_scene()
+    if loaded > 1:
+        return (
+            f"{loaded} molecules are loaded and none is active. Pass one, or "
+            "select it in the viewport first"
+        )
+    if loaded == 1:
+        return "pass the molecule, or select it in the viewport first"
+    return "no molecule is loaded"
+
+
+def _molecules_in_scene() -> int:
+    """How many molecules Molecular Nodes is tracking, for the message above."""
+    from ..core import mn as mn_bridge
+
+    module = mn_bridge.get_mn()
+    if module is None:
+        return 0
+    try:
+        return len(module.session.get_session().molecules)
+    except Exception:  # pragma: no cover - depends on MN being registered
+        return 0
+
+
 def publication_setup(
     target: Any = None,
     preset: str | RenderPreset = "figure",
@@ -182,8 +219,18 @@ def publication_setup(
         except Exception as exc:
             report.origin = "skipped"
             report.warnings.append(f"origin was not changed: {exc}")
+    elif origin_method is None:
+        report.origin = "not requested"
     else:
-        report.origin = "skipped (no object)" if origin_method else "not requested"
+        report.origin = "skipped (no object)"
+        # `origin` records this, and the operator surfaces `warnings` and
+        # nothing else — so a scene with two molecules and neither of them
+        # active was set up with no materials, no origin and not a word about
+        # either. What was skipped and why has to reach the user.
+        report.warnings.append(
+            "no molecule to work from, so the origin was left where it was: "
+            + _no_subject_reason(target, structure)
+        )
 
     # 2. Render engine, sampling, GPU and colour management.
     gpu = render.setup_render(
@@ -221,6 +268,11 @@ def publication_setup(
             )
         except Exception as exc:
             report.warnings.append(f"materials were not assigned: {exc}")
+    elif material_scheme is not None:
+        report.warnings.append(
+            f"no molecule to assign the {material_scheme!r} materials to: "
+            + _no_subject_reason(target, structure)
+        )
 
     # 5. Camera.
     if frame_camera:

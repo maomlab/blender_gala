@@ -45,6 +45,19 @@ __all__ = ["AtomStructure", "ReducePolicy"]
 ReducePolicy = str
 _REDUCE_POLICIES = ("single", "centroid", "first", "last", "closest")
 
+#: Integer point attributes Molecular Nodes writes onto every vertex, which the
+#: biotite array carries too. Comparing them is how the vertex/atom mapping is
+#: checked: ``atom_id`` is unique per atom, so it catches a reordering as well
+#: as an addition or a deletion, and a vertex made in Edit Mode gets zero.
+_IDENTITY_ATTRIBUTES = ("atom_id", "res_id")
+
+#: How far two vertices may disagree about the mesh's offset and still count as
+#: the same rigid shift, in Blender units. Vertex positions are stored as
+#: float32, so even an untouched mesh disagrees with the array in the last bits;
+#: 1e-5 BU is 1e-3 Å at Molecular Nodes' default scale, finer than any structure
+#: is deposited at.
+_OFFSET_TOLERANCE = 1e-5
+
 
 @dataclass
 class AtomStructure:
@@ -88,6 +101,11 @@ class AtomStructure:
         # other models to be able to honour a request for one of them.
         self._models = self.array if reduced is not self.array else None
         self.array = reduced
+        # Read now, while the object is certainly there: once it is deleted
+        # `object.name` is precisely what raises, and a message about the
+        # deletion that cannot say *which* object went is not much of a
+        # message. Refreshed whenever `name` is read successfully.
+        self._object_name = _name_of(self.object)
 
     # ------------------------------------------------------------------
     # Construction
@@ -144,12 +162,23 @@ class AtomStructure:
         array = getattr(molecule, "array", None)
         if array is None:
             raise StructureError("Molecular Nodes entity has no atom array")
-        return cls(
-            array=array,
-            object=getattr(molecule, "object", None),
-            molecule=molecule,
-            frame=frame,
-        )
+        try:
+            obj = molecule.object
+        except AttributeError:
+            # Not something that carries an object at all; headless, and the
+            # chemistry alone is a complete structure.
+            obj = None
+        except Exception as exc:
+            # `LinkedObjectError`: the entity is still in the session but the
+            # object it wrapped has been deleted. Reading it as "no object"
+            # would put every later measurement at the default world scale,
+            # which is a quiet guess about a molecule that is not there.
+            raise StructureError(
+                "the Blender object of this Molecular Nodes entity has been "
+                "deleted, so its geometry cannot be read. Re-import the "
+                "structure, or pass its atom array directly."
+            ) from exc
+        return cls(array=array, object=obj, molecule=molecule, frame=frame)
 
     @classmethod
     def _from_object(cls, obj: Any, frame: int) -> AtomStructure:
@@ -157,6 +186,7 @@ class AtomStructure:
         if molecule is not None:
             structure = cls._from_molecule(molecule, frame)
             structure.object = obj
+            structure._object_name = _name_of(obj)
             return structure
         raise StructureError(
             f"object {obj.name!r} is not tracked by Molecular Nodes, so its "
@@ -193,7 +223,7 @@ class AtomStructure:
         coord = getattr(models, "coord", None)
         if coord is None or np.asarray(coord).ndim != 3:
             raise StructureError(
-                f"{self.name!r} was built from a single model, so frame {frame} "
+                f"{self._label!r} was built from a single model, so frame {frame} "
                 "cannot be read from it"
             )
         return AtomStructure(
@@ -205,10 +235,35 @@ class AtomStructure:
     # ------------------------------------------------------------------
     @property
     def name(self) -> str:
-        """A readable name for messages and generated object names."""
-        if self.object is not None:
-            return str(self.object.name)
-        return "structure"
+        """A readable name for messages and generated object names.
+
+        Raises
+        ------
+        StructureError
+            If the Blender object behind this structure has been deleted.
+            Reading its name is one of the things that needs it to be there,
+            and Blender's own ``ReferenceError`` is not a :class:`GalaError`,
+            so nothing above could turn it into a message.
+        """
+        if self.object is None:
+            return "structure"
+        viewport.require_object(self.object, self._object_name)
+        self._object_name = str(self.object.name)
+        return self._object_name
+
+    @property
+    def _label(self) -> str:
+        """A name for error messages, which must not fail while producing one.
+
+        Every message in this module interpolates the structure's name, so a
+        name that raises would turn one failure into two — and :meth:`__repr__`
+        would stop working exactly when a user is trying to find out what they
+        are holding.
+        """
+        try:
+            return self.name
+        except StructureError:
+            return f"{self._object_name or 'structure'} (deleted)"
 
     @property
     def n_atoms(self) -> int:
@@ -225,7 +280,16 @@ class AtomStructure:
 
     @property
     def world_scale(self) -> float:
-        """Blender units per ångström for this structure."""
+        """Blender units per ångström for this structure.
+
+        Raises
+        ------
+        StructureError
+            If the Blender object has been deleted. The default scale would be
+            a guess about an object that is no longer there, and everything
+            measured with it would be silently in the wrong units.
+        """
+        viewport.require_object(self.object, self._object_name)
         return units.world_scale_of(self.object)
 
     @property
@@ -235,6 +299,16 @@ class AtomStructure:
         It carries the structure's named selections, so every selection this
         structure evaluates — a colour, an interaction side, a label — can name
         one that was stored from the viewport.
+
+        The freshness check is on the *array*, which cannot tell that the
+        object behind the stored selections has been deleted — so the two are
+        kept from disagreeing at the other end instead: a deleted object simply
+        has no names (:func:`.attributes.named_selections`), and a name that
+        was cached before the deletion reads back as absent. Either way
+        ``select("protein")`` still answers and ``select("pocket")`` is an
+        unknown name, whether or not something happened to warm the cache
+        first. Selecting is mostly chemistry, and the chemistry did not go
+        anywhere.
         """
         cached = getattr(self, "_context", None)
         if cached is None or cached.array is not self.array:
@@ -248,29 +322,212 @@ class AtomStructure:
     # ------------------------------------------------------------------
     # Geometry
     # ------------------------------------------------------------------
+    def geometry_drift(self) -> str | None:
+        """Say how the mesh stopped being this structure's atoms, or ``None``.
+
+        The whole adapter rests on vertex *i* being atom *i*, and a user in Edit
+        Mode can break that in a way no count notices: delete five vertices, add
+        five back, and the mesh is the right length while every atom reads a
+        different vertex. Measured that way, a 1.41 Å bond reported as 100 Å and
+        a colour landed on seven vertices for a selection of two atoms — both
+        reporting success.
+
+        So the check is on identity rather than on length. Molecular Nodes
+        writes ``atom_id`` and ``res_id`` as point attributes, the biotite array
+        carries the same two, and a vertex created in Edit Mode gets zero — so
+        comparing them catches a deletion, an addition *and* a reordering for
+        the cost of one attribute read, with no per-atom Python.
+
+        Returns
+        -------
+        str or None
+            A message naming the structure and what no longer lines up, ready
+            to be raised or reported. ``None`` when the mesh still holds one
+            vertex per atom in order — and when there is no mesh at all, since
+            a structure with only chemistry has nothing to disagree with.
+
+        Raises
+        ------
+        StructureError
+            If the Blender object has been deleted.
+        """
+        viewport.require_object(self.object, self._object_name)
+        mesh = getattr(self.object, "data", None) if self.object is not None else None
+        vertices = getattr(mesh, "vertices", None)
+        if vertices is None:
+            return None
+
+        n_points = len(vertices)
+        if n_points != self.n_atoms:
+            return (
+                f"{self._label!r} has {self.n_atoms} atoms but its mesh has "
+                f"{n_points} vertices, so vertex i is no longer atom i. Undo the "
+                "edit that added or removed vertices, or re-import the structure."
+            )
+
+        for name in _IDENTITY_ATTRIBUTES:
+            stored = _point_ints(mesh, name)
+            expected = getattr(self.array, name, None)
+            if stored is None or expected is None:
+                continue
+            expected = np.asarray(expected)
+            if stored.shape != expected.shape:
+                # Edit Mode: the values live in the BMesh and the datablock's
+                # copy is empty, exactly as `mesh.vertices` is stale there.
+                continue
+            wrong = int(np.count_nonzero(stored != expected))
+            if wrong:
+                return (
+                    f"{self._label!r} has one vertex per atom, but they are no "
+                    f"longer the same atoms: {wrong} of its {n_points} vertices "
+                    f"carry a different {name} from the atom they stand for. "
+                    "Deleting vertices and adding others back restores the count "
+                    "without restoring the correspondence."
+                )
+        return None
+
+    def require_atom_geometry(self) -> None:
+        """Refuse unless the mesh still holds one vertex per atom, in order.
+
+        For the callers that address the mesh *by atom index* — colouring is the
+        one whose mistakes reach a figure — and for which guessing is worse than
+        failing. See :meth:`geometry_drift`.
+
+        Raises
+        ------
+        StructureError
+            If the mesh no longer corresponds to the atoms, or the Blender
+            object has been deleted.
+        """
+        drift = self.geometry_drift()
+        if drift is not None:
+            raise StructureError(drift)
+
     def local_positions(self) -> np.ndarray:
         """Atom positions in the object's local space, in Blender units.
 
-        Falls back to ``coord * world_scale`` when there is no Blender object,
-        which keeps headless code paths identical to in-Blender ones.
-        """
-        if self.object is None or getattr(self.object, "data", None) is None:
-            return self.coord * self.world_scale
+        The mesh is read when — and only when — its vertices still *are* this
+        structure's atoms (:meth:`geometry_drift`) and hold the model this
+        structure is about. Otherwise the atom array is authoritative and the
+        positions come from ``coord * world_scale``, corrected for any rigid
+        shift between the array's frame and the mesh's (:meth:`_mesh_offset`).
+        That fallback is also the headless path, which keeps code outside
+        Blender identical to code inside it.
 
-        mesh = self.object.data
+        Raises
+        ------
+        StructureError
+            If the Blender object has been deleted. Never having had one and
+            having lost one are different states: the first has a documented
+            answer, the second has coordinates nobody can place in the scene.
+        """
+        viewport.require_object(self.object, self._object_name)
+        mesh = getattr(self.object, "data", None) if self.object is not None else None
         vertices = getattr(mesh, "vertices", None)
         if vertices is None or len(vertices) == 0:
-            return self.coord * self.world_scale
+            return self._array_positions(None)
+
+        # `frame=` reaches the chemistry and not the geometry: Molecular Nodes
+        # builds the base mesh from the first model and animates the rest
+        # through geometry nodes, so reading the mesh for any other frame draws
+        # model 0 while `.coord` reports the one that was asked for.
+        if not self._mesh_holds_frame() or self.geometry_drift() is not None:
+            return self._array_positions(mesh)
 
         flat = np.empty(len(vertices) * 3, dtype=np.float32)
         vertices.foreach_get("co", flat)
-        positions = flat.reshape(-1, 3).astype(float)
+        return flat.reshape(-1, 3).astype(float)
 
-        if positions.shape[0] != self.n_atoms:
-            # A style modifier or an edit-mode change broke the 1:1 mapping;
-            # the atom array remains authoritative.
-            return self.coord * self.world_scale
-        return positions
+    def _array_positions(self, mesh: Any) -> np.ndarray:
+        """The atom array's own coordinates, in the object's local frame."""
+        positions = self.coord * self.world_scale
+        offset = None if mesh is None else self._mesh_offset(mesh)
+        return positions if offset is None else positions + offset
+
+    def _mesh_holds_frame(self) -> bool:
+        """Whether the base mesh holds the model this structure is about.
+
+        Only model 0 is ever in the mesh, so any other frame has to be read out
+        of the array — the same split :attr:`coord` and :attr:`context` had one
+        round ago, reappearing one level out between :attr:`coord` and
+        :meth:`world_positions`.
+        """
+        coord = self._all_model_coords()
+        return True if coord is None else self.frame % coord.shape[0] == 0
+
+    def _all_model_coords(self) -> np.ndarray | None:
+        """Every model's coordinates, or ``None`` when there is only one."""
+        models = self._models
+        if models is None:
+            # A structure built from a molecule keeps the entity, whose array
+            # may still hold every model even though this one does not.
+            models = getattr(self.molecule, "array", None)
+        coord = getattr(models, "coord", None)
+        if coord is None:
+            return None
+        coord = np.asarray(coord)
+        return coord if coord.ndim == 3 else None
+
+    def _mesh_offset(self, mesh: Any) -> np.ndarray | None:
+        """The rigid shift from the atom array's frame to the mesh's, or ``None``.
+
+        :func:`blender_gala.scene.origin.set_origin_to_geometry` moves an origin
+        by shifting every vertex one way and the object transform the other,
+        which leaves world space untouched — but nothing shifts the biotite
+        array, so the moment the mesh can no longer be read directly the
+        fallback lands a whole origin offset away from what is drawn. Measured
+        at 4.4 Å, which is a figure with the labels in the wrong place rather
+        than a build that failed.
+
+        The shift is recovered rather than looked up, because the object records
+        no such number. It is read off the vertices that can still be named —
+        ``atom_id`` is unique per atom, and a vertex added in Edit Mode has zero,
+        which is no atom — and taken as the median, so that a handful of atoms
+        dragged about in Edit Mode do not veto the correction for all the rest.
+        A mesh where most vertices disagree has been deformed rather than moved,
+        and there is no single frame to correct into.
+
+        Returns
+        -------
+        numpy.ndarray or None
+            Shape ``(3,)`` in Blender units, or ``None`` when the mesh cannot
+            say.
+        """
+        stored = _point_ints(mesh, "atom_id")
+        expected = getattr(self.array, "atom_id", None)
+        if stored is None or expected is None or stored.size == 0:
+            return None
+        expected = np.asarray(expected)
+        if expected.size == 0 or np.unique(expected).size != expected.size:
+            # Without ids that are unique, no vertex can be tied to one atom.
+            return None
+
+        order = np.argsort(expected, kind="stable")
+        ordered = expected[order]
+        slot = np.clip(np.searchsorted(ordered, stored), 0, ordered.size - 1)
+        found = ordered[slot] == stored
+        if not found.any():
+            return None
+        atoms = order[slot[found]]
+
+        vertices = mesh.vertices
+        flat = np.empty(len(vertices) * 3, dtype=np.float32)
+        vertices.foreach_get("co", flat)
+        if flat.size != stored.size * 3:
+            # Edit Mode, where the attribute and the vertices are read from
+            # different copies of the mesh and need not describe each other.
+            return None
+
+        reference = self._mesh_model_coord()[atoms] * self.world_scale
+        deltas = flat.reshape(-1, 3).astype(float)[found] - reference
+        offset = np.median(deltas, axis=0)
+        agreed = np.abs(deltas - offset).max(axis=1) <= _OFFSET_TOLERANCE
+        return None if agreed.mean() <= 0.5 else offset
+
+    def _mesh_model_coord(self) -> np.ndarray:
+        """The coordinates the mesh was built from — model 0, in ångström."""
+        models = self._all_model_coords()
+        return self.coord if models is None else np.asarray(models[0], dtype=float)
 
     def world_positions(self) -> np.ndarray:
         """Atom positions in world space, in Blender units.
@@ -322,7 +579,7 @@ class AtomStructure:
             # Framing, lighting and orbiting all start from this, and a
             # structure with nothing placed has no centre to offer them; numpy
             # would say so only as a warning about the mean of an empty slice.
-            raise StructureError(f"{self.name!r} has no placed atoms to bound")
+            raise StructureError(f"{self._label!r} has no placed atoms to bound")
         centre = positions.mean(axis=0)
         radius = float(np.linalg.norm(positions - centre, axis=1).max())
         return centre, max(radius, 1e-4)
@@ -372,7 +629,17 @@ class AtomStructure:
         Reads Edit Mode's vertex selection when the object is in Edit Mode,
         and the stored flags otherwise. An all-false mask comes back when
         there is no Blender object behind this structure.
+
+        Raises
+        ------
+        StructureError
+            If the Blender object has been deleted, or its vertices are no
+            longer this structure's atoms. What the user has selected is real
+            either way, and reporting it as "nothing selected" is a false
+            answer that the advice which follows it — *select some atoms in
+            Edit Mode first* — makes worse.
         """
+        self.require_atom_geometry()
         return viewport.read_selection(self.object, self.n_atoms)
 
     def set_viewport_selection(
@@ -403,11 +670,19 @@ class AtomStructure:
     # Named selections
     # ------------------------------------------------------------------
     def alias_names(self) -> list[str]:
-        """The names of the aliases stored on this structure's object."""
+        """The names of the aliases stored on this structure's object.
+
+        Raises
+        ------
+        StructureError
+            If the Blender object has been deleted. The aliases went with the
+            mesh, and an empty list would say there never were any.
+        """
+        viewport.require_object(self.object, self._object_name)
         return gala_attributes.registered(self.object)
 
     def aliases(self) -> dict[str, np.ndarray]:
-        """Every stored alias, as ``{name: mask}``."""
+        """Every stored alias, as ``{name: mask}``. See :meth:`alias_names`."""
         return {
             name: mask
             for name in self.alias_names()
@@ -420,12 +695,15 @@ class AtomStructure:
 
         Raises
         ------
+        StructureError
+            If the Blender object has been deleted.
         KeyError
             If there is no alias of that name.
         """
+        viewport.require_object(self.object, self._object_name)
         mask = gala_attributes.read_boolean(self.object, name, self.n_atoms)
         if mask is None:
-            raise KeyError(f"no selection named {name!r} on {self.name!r}")
+            raise KeyError(f"no selection named {name!r} on {self._label!r}")
         return mask
 
     def store_alias(
@@ -445,7 +723,8 @@ class AtomStructure:
         Raises
         ------
         StructureError
-            If this structure has no Blender object.
+            If this structure has no Blender object, or had one that has since
+            been deleted.
         """
         mask = self.select(selection)
         if self.object is None:
@@ -453,15 +732,24 @@ class AtomStructure:
                 "this structure has no Blender object, so a named selection has "
                 "nowhere to live"
             )
+        viewport.require_object(self.object, self._object_name)
         gala_attributes.write_boolean(self.object, name, mask)
         gala_attributes.register(self.object, name)
         self._forget_names()
         return mask
 
     def delete_alias(self, name: str) -> bool:
-        """Remove a stored alias. Returns whether there was one."""
+        """Remove a stored alias. Returns whether there was one.
+
+        Raises
+        ------
+        StructureError
+            If the Blender object has been deleted, which is not the same
+            answer as "there was no such alias".
+        """
         if self.object is None:
             return False
+        viewport.require_object(self.object, self._object_name)
         gala_attributes.unregister(self.object, name)
         deleted = gala_attributes.delete_boolean(self.object, name)
         self._forget_names()
@@ -617,7 +905,7 @@ class AtomStructure:
         return self.n_atoms
 
     def __repr__(self) -> str:
-        return f"AtomStructure(name={self.name!r}, n_atoms={self.n_atoms})"
+        return f"AtomStructure(name={self._label!r}, n_atoms={self.n_atoms})"
 
 
 _ONE_LETTER = {
@@ -655,6 +943,27 @@ def _describe(selection: Any) -> str:
     return "<mask>"
 
 
+def _point_ints(mesh: Any, name: str) -> np.ndarray | None:
+    """Read an integer point attribute off a mesh, or ``None`` if there is none.
+
+    ``None`` covers every way of not having the data — no mesh, no such
+    attribute, or one of another type or domain that happens to share the name —
+    because each of them means the same thing to the caller: this attribute
+    cannot say whether the vertices are still the atoms.
+    """
+    attributes = getattr(mesh, "attributes", None)
+    attribute = attributes.get(name) if attributes is not None else None
+    if attribute is None:
+        return None
+    if getattr(attribute, "domain", "") != "POINT":
+        return None
+    if getattr(attribute, "data_type", "") != "INT":
+        return None
+    values = np.empty(len(attribute.data), dtype=np.int32)
+    attribute.data.foreach_get("value", values)
+    return values
+
+
 def _single_model(array: Any, frame: int) -> Any:
     """Reduce an ``AtomArrayStack`` to one ``AtomArray``."""
     coord = getattr(array, "coord", None)
@@ -669,7 +978,15 @@ def _single_model(array: Any, frame: int) -> Any:
 
 
 def _molecule_for_object(obj: Any) -> Any:
-    """Look an object up in the Molecular Nodes session."""
+    """Look an object up in the Molecular Nodes session.
+
+    The session outlives the objects it tracks: deleting a molecule leaves an
+    entity behind whose ``object`` property raises ``LinkedObjectError``. That
+    is not an ``AttributeError``, so a ``getattr`` default never applies and
+    the walk used to die on the first dead entry it passed — whichever *live*
+    object had been asked for, and with the outcome depending on the order the
+    molecules happened to be imported in.
+    """
     module = mn_bridge.get_mn()
     if module is None:
         return None
@@ -678,6 +995,36 @@ def _molecule_for_object(obj: Any) -> Any:
     except Exception:  # pragma: no cover - session unavailable outside Blender
         return None
     for entity in getattr(session, "entities", {}).values():
-        if getattr(entity, "object", None) is obj:
+        if _entity_object(entity) is obj:
             return entity
     return None
+
+
+def _entity_object(entity: Any) -> Any:
+    """The Blender object of a session entry, or ``None`` if it is gone.
+
+    ``Molecule.object`` raises ``LinkedObjectError`` once the object it wraps
+    has been deleted — see :func:`_molecule_for_object`. Every exception is
+    caught rather than that one class alone, because the class lives in
+    ``databpy`` and importing it here to name it would make a soft dependency
+    a hard one.
+    """
+    try:
+        return entity.object
+    except Exception:
+        return None
+
+
+def _name_of(obj: Any) -> str | None:
+    """The name of a Blender object, or ``None`` when it has none to give.
+
+    Read while the object is known to be there, so that a message written
+    after it was deleted can still say which object went: reading ``.name`` is
+    exactly what raises once it has.
+    """
+    if obj is None:
+        return None
+    try:
+        return str(obj.name)
+    except Exception:
+        return None

@@ -51,6 +51,24 @@ _COLOR_ATTRIBUTE = "Color"
 _MN_COLOR_SETTER = "Set Color"
 
 
+def _shared_with_another_object(tree: Any, obj: Any) -> bool:
+    """Whether another object's modifier is driven by this same node tree.
+
+    ``tree.users`` cannot answer this on its own: it counts a fake user and any
+    tree that nests this one, so it says "shared" for a tree only one object
+    uses and would have every colouring call leave a duplicate behind.
+    """
+    if bpy is None:  # pragma: no cover
+        return False
+    for other in bpy.data.objects:
+        if other is obj:
+            continue
+        for modifier in getattr(other, "modifiers", ()):
+            if getattr(modifier, "node_group", None) is tree:
+                return True
+    return False
+
+
 def _release_mn_color_override(obj: Any) -> int:
     """Stop Molecular Nodes' node tree overwriting the colours just written.
 
@@ -81,6 +99,14 @@ def _release_mn_color_override(obj: Any) -> int:
         tree = getattr(modifier, "node_group", None)
         if tree is None:
             continue
+        if _shared_with_another_object(tree, obj):
+            # A Shift+D copy shares its node tree with the original, so muting
+            # a node in it changes what *both* render — colouring one copy of a
+            # comparison figure switches the other's colour source too. Give
+            # this object its own copy of the tree first; the objects still
+            # sharing the original are left exactly as they were.
+            tree = tree.copy()
+            modifier.node_group = tree
         for node in tree.nodes:
             group = getattr(node, "node_tree", None)
             if group is None or group.name != _MN_COLOR_SETTER:
@@ -151,7 +177,10 @@ def write_colors(
     Raises
     ------
     StructureError
-        If the target has no Blender mesh to write to.
+        If the target has no Blender mesh to write to, or its vertices are no
+        longer its atoms. Colours are indexed by *atom*, so a mesh that has
+        drifted would take an atom-indexed array straight onto vertex indices
+        and paint the wrong atoms while reporting how many it wrote.
     ValueError
         If the array shape does not match the atom count.
     """
@@ -162,9 +191,17 @@ def write_colors(
         raise StructureError(
             "write_colors needs a Blender object; the structure was loaded without one."
         )
+    # Before anything is computed or written: the arithmetic below is indexed by
+    # atom and applied to vertices, so validating it against the mesh — which is
+    # what it used to do — accepts exactly the case it has to refuse, and the
+    # cases it does catch escape as `IndexError: index 62 is out of bounds`,
+    # naming neither the molecule nor the edit.
+    structure.require_atom_geometry()
 
     mesh = obj.data
-    n_points = len(mesh.vertices)
+    # One vertex per atom, checked just above, so an atom index and a vertex
+    # index are the same number and the arithmetic below can be read either way.
+    n_atoms = structure.n_atoms
 
     rgba = np.asarray(colors, dtype=float)
     if rgba.ndim != 2 or rgba.shape[1] not in (3, 4):
@@ -178,26 +215,26 @@ def write_colors(
             name=_COLOR_ATTRIBUTE, type="FLOAT_COLOR", domain="POINT"
         )
 
-    flat = np.empty(n_points * 4, dtype=np.float32)
+    flat = np.empty(n_atoms * 4, dtype=np.float32)
     attribute.data.foreach_get("color", flat)
     current = flat.reshape(-1, 4)
 
     if mask is None:
-        if rgba.shape[0] != n_points:
+        if rgba.shape[0] != n_atoms:
             raise ValueError(
-                f"expected {n_points} colours for {n_points} atoms, got {rgba.shape[0]}"
+                f"expected {n_atoms} colours for {n_atoms} atoms, got {rgba.shape[0]}"
             )
         current[:] = rgba
-        written = n_points
+        written = n_atoms
     else:
         indices = np.flatnonzero(np.asarray(mask, dtype=bool))
-        if rgba.shape[0] == n_points:
+        if rgba.shape[0] == n_atoms:
             current[indices] = rgba[indices]
         elif rgba.shape[0] == indices.size:
             current[indices] = rgba
         else:
             raise ValueError(
-                f"expected {indices.size} or {n_points} colours, got {rgba.shape[0]}"
+                f"expected {indices.size} or {n_atoms} colours, got {rgba.shape[0]}"
             )
         written = int(indices.size)
 
@@ -217,19 +254,28 @@ def read_colors(target: Any) -> np.ndarray:
     numpy.ndarray
         Shape ``(n_atoms, 4)`` of linear RGBA. All white if the attribute does
         not exist yet.
+
+    Raises
+    ------
+    StructureError
+        If there is no Blender object, or its vertices are no longer its atoms.
+        The colours live on the *vertices*, so a drifted mesh has one row per
+        vertex — which the promise above says is one row per atom, and which a
+        caller then indexes with atom indices.
     """
     structure = AtomStructure.from_any(target)
     obj = structure.object
     if obj is None:
         raise StructureError("read_colors needs a Blender object")
+    structure.require_atom_geometry()
 
     mesh = obj.data
     attribute = mesh.color_attributes.get(_COLOR_ATTRIBUTE)
-    n_points = len(mesh.vertices)
+    n_atoms = structure.n_atoms
     if attribute is None:
-        return np.ones((n_points, 4), dtype=float)
+        return np.ones((n_atoms, 4), dtype=float)
 
-    flat = np.empty(n_points * 4, dtype=np.float32)
+    flat = np.empty(n_atoms * 4, dtype=np.float32)
     attribute.data.foreach_get("color", flat)
     return flat.reshape(-1, 4).astype(float)
 

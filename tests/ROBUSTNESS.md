@@ -8,8 +8,11 @@ a `.pse` that is not a session.
 
 `tests/test_robustness.py` (everything that is just data),
 `tests/test_robustness_blender.py` (everything that needs a scene) and
-`tests/test_robustness_structures.py` (everything that needs an awkward
-structure) implement the permanent part of what follows. The rest is a plan, so
+`tests/test_robustness_structures.py` (an awkward structure),
+`tests/test_robustness_lifecycle.py` (molecules coming and going),
+`tests/test_robustness_modification.py` (a molecule edited after Gala met it)
+and `tests/test_robustness_multi.py` (several at once) implement the permanent
+part of what follows. The rest is a plan, so
 that the cases we decided *not* to run on every commit are written down rather
 than forgotten.
 
@@ -568,3 +571,132 @@ Molecular Nodes' readers, in both formats where both exist.
 - Blank chain, altloc and insertion-code values cannot be selected positively
   (`chain ""` matches nothing), though the negated forms work; and `charge`,
   `b` and `q` take no value list. Both match PyMOL.
+
+---
+
+## 8. Molecules coming, going, changing and multiplying
+
+Every Blender test in the suite used to load exactly **one** molecule, once,
+and leave it alone until the test ended. That is not a scene anyone actually
+builds. A user imports a structure, imports a second to compare against,
+duplicates one with Shift+D, tabs into Edit Mode and prunes a few atoms, scales
+an object to fit the layout, deletes the first structure, reloads it — and
+presses buttons in the sidebar at every point in between.
+
+Three axes, one module each.
+
+### The lifecycle: loading, reloading, deleting
+
+Molecular Nodes' session outlives the objects it tracks, so "the molecule is
+gone" is a state Gala meets routinely.
+
+1. **A dead session entry poisoned every live one.** Resolving *any* object
+   walks the session, and reading `entity.object` on an entry whose object was
+   deleted raises `LinkedObjectError` — not an `AttributeError`, so the
+   `getattr` default never applied and the walk died on the first dead entry,
+   whichever live object had been asked for. The identical hazard §5.19 fixed
+   in the operator layer, on the library path that `select`, `distance`,
+   `label`, `find_interactions`, `color_by_*` and `create_alias` all funnel
+   through — 40+ call sites. Order-dependent: deleting the earlier-loaded
+   molecule poisoned the later, deleting the later left the earlier fine. Both
+   orders are now asserted.
+2. **A stale structure raised `ReferenceError`** from `.name`,
+   `.world_positions()`, `store_alias` and the rest — including from `repr`,
+   so an error message interpolating `self.name` turned one failure into two.
+   Now a `StructureError` naming what went, with a `repr` fallback; the pure
+   chemistry (`n_atoms`, `coord`, `atom_label`) keeps answering, because the
+   array never needed the object.
+3. **Whether a stale structure could be selected from depended on cache
+   history** — two scripts differing only in an earlier, unrelated call
+   disagreed. Now they agree, and the test compares the two paths against each
+   other rather than letting each have its own answer.
+4. **`select` could not take a Blender object** while `distance` and `label`
+   could.
+
+### Modification: the vertex-to-atom correspondence
+
+Gala's central assumption is that vertex *i* is atom *i*.
+
+5. **A restored vertex count was taken as proof.** Delete five vertices, add
+   five back: the count matches, the guard does not fire, every atom reads a
+   different vertex. A 1.41 Å bond reported as **100 Å**; `color_by_selection`
+   painting seven vertices for a two-atom selection; success reported both
+   times. The guard now checks *identity* — the mesh's `atom_id` and `res_id`
+   against the array's — which catches deletion, addition and reordering.
+6. **The object's transform scaled measurements documented in ångström.**
+   `scale=(2,2,2)` turned a 1.414 Å bond into 2.828 Å, `(3,1,1)` turned a
+   115.3° angle into 61.5°, and a mirrored object flipped a dihedral's sign.
+   Meanwhile `find_interactions` measured on the array, so the two disagreed
+   about the same molecule. Measurement now happens in the molecule's own
+   frame — the transform is divided out rather than the object refused, since a
+   non-uniform scale is a legitimate layout choice and the bond length is still
+   well defined.
+7. **A viewport selection of 20 vertices read back as `'none'`**, and
+   `create_alias` answered "select some atoms in Edit Mode first" — advice the
+   user had just taken.
+8. **The colour path validated against the mesh and never the atoms**, so an
+   atom-indexed array was written onto vertex indices whenever the two lengths
+   happened to agree; `read_colors` returned one row per vertex against a
+   docstring promising one per atom; and a genuine mismatch escaped as raw
+   numpy.
+9. **`frame=` reached the chemistry and not the geometry** — the base mesh is
+   always model 0, so everything *drawn* landed on the wrong model. The same
+   split fixed between `.coord` and `.context.coord` a round earlier,
+   reappearing one level out.
+10. **Moving the origin displaced everything drawn** once anything else made
+    `local_positions` fall back to the array — measured at 4.4 Å, with labels
+    and interaction lines drawn there.
+
+### Several at once
+
+11. **`publication_setup` pulled its target out of register with every other
+    molecule.** `move_to_world_origin` throws away the compensation that keeps
+    the geometry where it was, and moves only the target: a protein and its
+    separately imported ligand went from 2.28 Å apart to 3.52 Å, the ligand
+    left the pocket, `warnings` was empty and the operator reported success.
+    Now the rest of the figure travels by the same delta — including Gala's own
+    labels, measurements and interaction lines, whose world-space anchors are
+    shifted with them; the camera and lights deliberately stay, since bringing
+    the subject to a rig built about the origin is what the flag is for.
+12. **A Shift+D copy retargeted every operator to the original.** Resolving the
+    untracked mesh raised, the operator layer swallowed it, and the
+    "only molecule in the session" fallback applied — so colours, aliases,
+    labels and measurements landed on the object the user was not looking at.
+    An active mesh that fails to resolve is now refused; nothing active, or a
+    non-mesh active, still resolves the lone molecule.
+13. **Colouring one copy recoloured the other**, because a duplicate shares its
+    node group and muting `Set Color` changes what both render. Two separately
+    *loaded* copies get separate trees and were always fine — it is duplication
+    that shares. The target's tree is now made its own first.
+14. **`save_session(molecules=[a])` adopted the other molecule's annotations**
+    — a label 100 Å away recorded on atom 71 of A, and measurements ignoring
+    the filter entirely.
+15. **A label on one of two superposed copies was attributed to the other.**
+    Two separately loaded superposed molecules leave *no* signal in the scene:
+    identical coordinates, identical transforms, an anchor exactly zero from
+    both. Labels now record which molecule they were drawn from, and an anchor
+    that genuinely cannot be attributed is skipped rather than guessed.
+16. **Setting up a scene with no resolvable subject said nothing** — materials
+    and the origin were skipped with an empty `warnings`, the only field the
+    operator surfaces.
+
+### Recorded, not fixed
+
+- **There is no way to ask for interactions between two objects.** A protein
+  and its ligand imported separately is the most common real case, and
+  `find_interactions` takes a single target; naming an atom from the other
+  object gives a correct, well-worded `EmptySelectionError` that cannot be
+  satisfied. Concatenating the two arrays works and reproduces the one-file
+  answer exactly, but carries file coordinates rather than each object's
+  transform, so it is a workaround rather than the feature. This is a
+  capability gap, not a defect.
+- **Named selections restored from a PyMOL session are not registered as
+  aliases**, so the Stored Selections panel is empty after a session load even
+  though the attributes are there and `%name` resolves.
+- **`save_session` applies the first molecule's world scale to every
+  measurement, label and the camera.** Latent — nothing in Gala writes a
+  non-default scale, and Molecular Nodes has no scale argument.
+- **The origin offset is recovered by inference, not bookkeeping.** Nothing
+  records it, so the fallback matches `atom_id` and takes the median offset,
+  accepting it only if a majority agree. Recording the offset where it is
+  applied would be sturdier.

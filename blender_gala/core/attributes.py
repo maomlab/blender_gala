@@ -33,6 +33,8 @@ from typing import Any
 
 import numpy as np
 
+from .viewport import is_removed, require_object
+
 __all__ = [
     "REGISTRY_KEY",
     "attribute_conflict",
@@ -52,6 +54,17 @@ REGISTRY_KEY = "gala_selections"
 
 
 def _mesh(obj: Any) -> Any:
+    """The mesh datablock behind ``obj``, or ``None`` when there is none.
+
+    A deleted object counts as having none. Reading it is what raises
+    ``ReferenceError``, and the reading side of this module answers "no
+    attributes" rather than refusing: a selection string that never names a
+    stored selection has no business failing because the mesh went away. The
+    writing side below is where a deleted object is an error, because there is
+    nowhere for the value to go.
+    """
+    if is_removed(obj):
+        return None
     data = getattr(obj, "data", None)
     return data if getattr(data, "attributes", None) is not None else None
 
@@ -106,8 +119,13 @@ def read_boolean(obj: Any, name: str, n_atoms: int | None = None) -> np.ndarray 
     Returns
     -------
     numpy.ndarray or None
-        Boolean mask, or ``None`` if there is no such attribute.
+        Boolean mask, or ``None`` if there is no such attribute — including
+        when the object holding it has been deleted, since a mask that no
+        longer exists and one that never did read the same way here.
     """
+    if is_removed(obj):
+        return None
+
     found = _bmesh_layer(obj, name, create=False)
     if found is not None:
         mesh, layer = found
@@ -173,11 +191,17 @@ def write_boolean(obj: Any, name: str, mask: np.ndarray) -> None:
 
     Raises
     ------
+    StructureError
+        If ``obj`` has been deleted, so there is no mesh to store the mask on.
     ValueError
         If ``mask`` is not one value per vertex, or ``name`` already belongs to
         an attribute this could not write to without destroying it — see
         :func:`attribute_conflict`.
     """
+    # Before anything else: every message below names the object, and asking a
+    # deleted one for its name is what raises.
+    require_object(obj)
+
     mask = np.asarray(mask, dtype=bool)
 
     # Checked before the mode is looked at: the mesh carries the same
@@ -220,7 +244,16 @@ def write_boolean(obj: Any, name: str, mask: np.ndarray) -> None:
 
 
 def delete_boolean(obj: Any, name: str) -> bool:
-    """Remove a named attribute. Returns whether there was one to remove."""
+    """Remove a named attribute. Returns whether there was one to remove.
+
+    Raises
+    ------
+    StructureError
+        If ``obj`` has been deleted. Removing an attribute from an object that
+        is gone is not the same as finding nothing to remove.
+    """
+    require_object(obj)
+
     found = _bmesh_layer(obj, name, create=False)
     if found is not None:
         import bmesh
@@ -266,9 +299,11 @@ def registered(obj: Any) -> list[str]:
 
     Names whose attribute has since been deleted — by hand in the Object Data
     panel, say — are dropped, so the list never advertises an alias that would
-    style nothing.
+    style nothing. An object that has itself been deleted has no aliases to
+    list; callers for whom that is an error say so themselves, as
+    :meth:`blender_gala.core.entity.AtomStructure.alias_names` does.
     """
-    if obj is None:
+    if obj is None or is_removed(obj):
         return []
     stored = obj.get(REGISTRY_KEY, ())
     present = set(list_booleans(obj))
@@ -276,7 +311,14 @@ def registered(obj: Any) -> list[str]:
 
 
 def register(obj: Any, name: str) -> None:
-    """Record ``name`` as an alias, keeping the order and avoiding duplicates."""
+    """Record ``name`` as an alias, keeping the order and avoiding duplicates.
+
+    Raises
+    ------
+    StructureError
+        If ``obj`` has been deleted, so the registry has nowhere to live.
+    """
+    require_object(obj)
     names = [str(existing) for existing in obj.get(REGISTRY_KEY, ())]
     if name not in names:
         names.append(name)
@@ -284,7 +326,14 @@ def register(obj: Any, name: str) -> None:
 
 
 def unregister(obj: Any, name: str) -> None:
-    """Forget ``name``, leaving the attribute itself alone."""
+    """Forget ``name``, leaving the attribute itself alone.
+
+    Raises
+    ------
+    StructureError
+        If ``obj`` has been deleted, so the registry cannot be rewritten.
+    """
+    require_object(obj)
     names = [str(existing) for existing in obj.get(REGISTRY_KEY, ())]
     obj[REGISTRY_KEY] = [existing for existing in names if existing != name]
 
@@ -346,12 +395,33 @@ def named_selections(target: Any, n_atoms: int | None = None) -> Mapping[str, An
     Returns
     -------
     Mapping
-        Names in creation order, masks read on demand.
+        Names in creation order, masks read on demand. Empty when the object
+        the names would have come from has been deleted: the chemistry a
+        selection is mostly made of does not depend on the mesh, and taking
+        ``protein`` down with ``pocket`` would make the answer depend on
+        whether anything happened to have filled a cache earlier.
     """
-    obj = getattr(target, "object", None)
+    obj = _target_object(target)
     if obj is None and _mesh(target) is not None:
         obj = target
     return _BooleanAttributes(obj, n_atoms) if obj is not None else {}
+
+
+def _target_object(target: Any) -> Any:
+    """The Blender object ``target`` carries, or ``None``.
+
+    Not a plain ``getattr``: Molecular Nodes' ``Molecule.object`` raises
+    ``LinkedObjectError`` once the object is gone and a deleted object raises
+    ``ReferenceError`` for any attribute at all, neither of which is an
+    ``AttributeError``, so the default of a ``getattr`` would never apply.
+    """
+    if is_removed(target):
+        return None
+    try:
+        obj = target.object
+    except Exception:
+        return None
+    return None if is_removed(obj) else obj
 
 
 #: Anything that is not a word character. ``\W`` rather than ``[^0-9A-Za-z_]``

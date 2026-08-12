@@ -183,6 +183,14 @@ def label(
         # the object's own location no longer says what it is labelling.
         # Exporting the scene needs the anchor, not the resting place.
         obj["gala_anchor"] = [float(v) for v in position]
+        # Which molecule it labels, as opposed to which molecule it is nearest.
+        # Two superposed conformations — the ordinary comparison figure — leave
+        # no signal in the scene at all: identical coordinates, identical
+        # transforms, and an anchor exactly zero from both. Writing the name
+        # down here is the only thing that can tell them apart later, and
+        # `save_session` reads it in preference to guessing from the geometry.
+        if structure.object is not None:
+            obj["gala_molecule"] = structure.object.name
         created.append(obj)
 
         if style == "card":
