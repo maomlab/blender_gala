@@ -84,13 +84,20 @@ def active_structure(context: Any) -> AtomStructure | None:
     Falls back to the only Molecular Nodes molecule in the session when
     nothing suitable is active — the common case where a user has just
     imported one structure and then clicked in the sidebar.
+
+    An active *mesh* is not that case, even when it cannot be read: a Shift+D
+    copy of a molecule is a mesh that looks exactly like one and that Molecular
+    Nodes does not track, and falling through would point every button in the
+    panel at the original — colours, aliases, labels and measurements landing
+    on the object the user is not looking at, reported as success. Whatever the
+    user has selected is what the panel acts on, or nothing is.
     """
     obj = context.active_object
     if obj is not None and obj.type == "MESH":
         try:
             return AtomStructure.from_any(obj)
         except Exception:
-            pass
+            return None
 
     module = mn_bridge.get_mn()
     if module is None:
@@ -903,6 +910,15 @@ class GALA_OT_label(_GalaOperator):
             size=props.label_size,
             billboard=props.label_billboard,
         )
+        # Which molecule the label was drawn from. Exporting a scene has to
+        # decide which molecule carries each label, and the geometry alone
+        # cannot say when two copies are superposed — the comparison figure —
+        # because both are equally near. Recorded here rather than guessed
+        # there; :func:`blender_gala.pymol.save._add_labels` uses it when it is
+        # present and falls back to the nearest atom when it is not.
+        if structure.object is not None:
+            for obj in created:
+                obj["gala_molecule"] = structure.object.name
         self.report({"INFO"}, f"Created {len(created)} label objects.")
         return {"FINISHED"}
 

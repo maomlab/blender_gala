@@ -78,6 +78,18 @@ _MEASURED_BETWEEN = {"distance": 2, "angle": 3, "dihedral": 4}
 #: where an object came from rather than what it was grouped with.
 _MN_COLLECTION = "MolecularNodes"
 
+#: How far from an atom, in ångström, a label's anchor may sit and still be a
+#: label on that atom. A label is drawn at an atom or at a residue centroid,
+#: so the atom it belongs to is always within about a bond length of it.
+#: Anything further away is a label on something that is not being written, and
+#: attaching it anyway is how a label drawn 100 Å away ends up on atom 71.
+_ANCHOR_TOLERANCE = 2.0
+
+#: The custom property a label carries naming the molecule it was drawn from.
+#: Where the geometry is ambiguous — two superposed copies — this is the only
+#: thing that can tell them apart.
+_LABEL_MOLECULE = "gala_molecule"
+
 
 @dataclass
 class SavedSession:
@@ -208,11 +220,16 @@ def scene_to_session(
             _add_selections(session, structure, entity, selections)
             _add_group(session, entity, molecule)
 
+    # The molecules the scene holds that this session does not. An annotation
+    # sitting on one of them belongs to it, not to whatever is nearest among
+    # the molecules that happen to be written.
+    left_out = _left_out(entities, result)
+
     if labels:
-        _add_labels(session, scale, result)
+        _add_labels(session, scale, result, left_out)
 
     if measurements:
-        session.measurements.extend(_measurements(scale, result))
+        session.measurements.extend(_measurements(session, scale, result, left_out))
 
     if camera:
         session.view = _camera_view(session, scale)
@@ -514,8 +531,22 @@ def _add_selections(
 # ---------------------------------------------------------------------------
 
 
-def _measurements(scale: float, result: SavedSession) -> list[PymolMeasurement]:
-    """Collect Gala measurements from the scene, grouped by kind."""
+def _measurements(
+    session: PymolSession,
+    scale: float,
+    result: SavedSession,
+    left_out: Sequence[tuple[str, np.ndarray]] = (),
+) -> list[PymolMeasurement]:
+    """Collect Gala measurements from the scene, grouped by kind.
+
+    Restricting the export to some of the scene's molecules restricts the
+    measurements with it: a distance to an atom that is not in the file is
+    drawn in PyMOL as a distance to nothing, and it is the *other* molecule's
+    measurement in the first place. Which one a measurement belongs to is
+    decided per endpoint, by whichever molecule is nearest — and unlike a
+    label there is no absolute distance to test against, because a distance
+    between two centroids is legitimately drawn between no atoms at all.
+    """
     from ..core import collections as gala_collections
 
     by_kind: dict[str, list[np.ndarray]] = {}
@@ -539,12 +570,40 @@ def _measurements(scale: float, result: SavedSession) -> list[PymolMeasurement]:
                 f"{needed * 3} PyMOL's is between)"
             )
             continue
-        by_kind.setdefault(kind, []).append(flat.reshape(needed, 3) / scale)
+
+        points = flat.reshape(needed, 3) / scale
+        elsewhere = _measured_elsewhere(session, left_out, points)
+        if elsewhere is not None:
+            result.skipped.append(
+                f"{obj.name}: it measures to {elsewhere}, which is not being written"
+            )
+            continue
+
+        by_kind.setdefault(kind, []).append(points)
 
     return [
         PymolMeasurement(name=f"gala_{kind}s", kind=kind, points=np.stack(groups))
         for kind, groups in sorted(by_kind.items())
     ]
+
+
+def _measured_elsewhere(
+    session: PymolSession,
+    left_out: Sequence[tuple[str, np.ndarray]],
+    points: np.ndarray,
+) -> str | None:
+    """The molecule not being written that one end of a measurement is on."""
+    if not left_out:
+        return None
+    for point in points:
+        here = min(
+            (_nearest(molecule.coord[0], point)[0] for molecule in session.molecules),
+            default=float("inf"),
+        )
+        name = _nearer_elsewhere(left_out, point, here)
+        if name is not None:
+            return name
+    return None
 
 
 def _add_group(session: PymolSession, entity: Any, molecule: PymolMolecule) -> None:
@@ -601,13 +660,87 @@ def _parent_collection(collection: Any) -> Any:
     return None
 
 
-def _add_labels(session: PymolSession, scale: float, result: SavedSession) -> None:
-    """Attach each Gala label to the nearest atom it could be labelling.
+def _left_out(
+    written: Sequence[Any], result: SavedSession
+) -> list[tuple[str, np.ndarray]]:
+    """The scene's molecules that this session is not being given, in ångström.
+
+    ``save_session(path, molecules=[a])`` writes one molecule out of a scene
+    that holds several. Every annotation in that scene is still there to be
+    collected, and deciding who owns one by asking which of the *written*
+    molecules is nearest answers a question nobody asked: a label drawn on the
+    molecule that was left out is nearest to it, not to anything here.
+    """
+    try:
+        everything = _molecules(None, result)
+    except Exception:  # pragma: no cover - no MN session to read
+        return []
+
+    kept = {obj.name for obj in (_entity_object(entity) for entity in written) if obj}
+    left = []
+    for entity in everything:
+        obj = _entity_object(entity)
+        if obj is None or obj.name in kept:
+            continue
+        try:
+            structure = AtomStructure.from_any(entity)
+            coord = structure.world_positions() / structure.world_scale
+        except Exception:  # pragma: no cover - unreadable molecule
+            continue
+        if len(coord):
+            left.append((obj.name, coord))
+    return left
+
+
+def _nearest(coord: np.ndarray, point: np.ndarray) -> tuple[float, int]:
+    """Distance to the nearest of ``coord`` and its index, ``inf`` if none is.
+
+    A structure with no placed atoms — every coordinate ``nan``, as a PyMOL
+    state with absent atoms is stored — has no nearest anything, and asking
+    numpy for one raises rather than saying so.
+    """
+    distances = np.linalg.norm(coord - point, axis=1)
+    if not np.isfinite(distances).any():
+        return float("inf"), -1
+    index = int(np.nanargmin(distances))
+    return float(distances[index]), index
+
+
+def _nearer_elsewhere(
+    left_out: Sequence[tuple[str, np.ndarray]], point: np.ndarray, distance: float
+) -> str | None:
+    """The molecule not being written that is closer to ``point``, if any.
+
+    A tie is not enough to disqualify an annotation: two superposed copies are
+    the same place, and the copy being written is as good an owner as the one
+    that is not.
+    """
+    for name, coord in left_out:
+        if _nearest(coord, point)[0] < distance:
+            return name
+    return None
+
+
+def _add_labels(
+    session: PymolSession,
+    scale: float,
+    result: SavedSession,
+    left_out: Sequence[tuple[str, np.ndarray]] = (),
+) -> None:
+    """Attach each Gala label to the atom it was drawn on.
 
     PyMOL hangs a label off an atom, where Gala's is a text object standing in
     space near one. The anchor recorded when the label was drawn says which
     point it belongs to; the nearest atom to that point is the atom PyMOL
-    should carry it.
+    should carry it — but only if there really is an atom there. Nearest with
+    no bound on the distance turns "this label belongs to a molecule you are
+    not writing" into "atom 71 of this one", which is a wrong figure rather
+    than a missing label, so a label with no atom near it is skipped and said
+    out loud like every other per-item failure.
+
+    Where the label recorded which molecule it was drawn from, that is used
+    instead of the geometry: two superposed copies are equally near every
+    anchor, so the geometry cannot tell them apart at all.
     """
     from ..core import collections as gala_collections
 
@@ -621,16 +754,58 @@ def _add_labels(session: PymolSession, scale: float, result: SavedSession) -> No
             continue
         point = np.asarray(list(anchor), dtype=float) / scale
 
+        drawn_from = obj.get(_LABEL_MOLECULE)
+        candidates = list(session.molecules)
+        if drawn_from is not None:
+            named = str(drawn_from).replace(" ", "_")
+            candidates = [m for m in session.molecules if m.name == named]
+            if not candidates:
+                result.skipped.append(
+                    f"{obj.name}: it labels {drawn_from}, which is not being written"
+                )
+                continue
+
         best: tuple[float, PymolMolecule, int] | None = None
-        for molecule in session.molecules:
-            distances = np.linalg.norm(molecule.coord[0] - point, axis=1)
-            index = int(np.nanargmin(distances))
-            if best is None or distances[index] < best[0]:
-                best = (float(distances[index]), molecule, index)
+        tied = False
+        for molecule in candidates:
+            distance, index = _nearest(molecule.coord[0], point)
+            if best is None or distance < best[0]:
+                best = (distance, molecule, index)
+                tied = False
+            elif distance == best[0]:
+                tied = True
 
         if best is None or not np.isfinite(best[0]):
             continue
-        _, molecule, index = best
+        distance, molecule, index = best
+
+        if drawn_from is None:
+            elsewhere = _nearer_elsewhere(left_out, point, distance)
+            if elsewhere is not None:
+                result.skipped.append(
+                    f"{obj.name}: it was drawn on {elsewhere}, which is not "
+                    "being written"
+                )
+                continue
+            if tied:
+                # Two molecules exactly as near as each other is the superposed
+                # comparison figure, and whichever is written first is not an
+                # answer — it is a coin toss recorded as fact in the session.
+                result.skipped.append(
+                    f"{obj.name}: it sits the same distance from more than one "
+                    "molecule, so which one it labels cannot be told from the "
+                    "scene"
+                )
+                continue
+
+        if distance > _ANCHOR_TOLERANCE:
+            result.skipped.append(
+                f"{obj.name}: the nearest atom to it is {distance:.1f} A away, "
+                f"in {molecule.name}, which is further than a label is ever "
+                "drawn from what it labels"
+            )
+            continue
+
         molecule.label[index] = text
         molecule.reps[index] |= 1 << REPS.index("labels")
 

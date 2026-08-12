@@ -1606,9 +1606,29 @@ def as_atom_array(target: Any) -> Any:
     Nodes ``Molecule`` or a Gala ``AtomStructure``. Without this, passing a
     ``Molecule`` straight to ``select`` would find no annotations and silently
     return an all-false mask.
+
+    A Blender object carries no array of its own: its chemistry lives in the
+    Molecular Nodes session, and looking it up there is
+    :meth:`.AtomStructure.from_any`'s job. Everything else in the public API
+    goes through that already, so ``select(obj, "protein")`` used to be the one
+    call that failed on an object the rest of the API accepts.
+
+    Raises
+    ------
+    StructureError
+        If ``target`` holds no atoms and cannot be resolved to something that
+        does.
     """
     array = getattr(target, "array", target)
     coord = getattr(array, "coord", None)
+    if coord is None:
+        # Only reached by something that is not a structure in its own right,
+        # so the cost of resolving it stays off the per-selection path — and
+        # the import is deferred because `entity` imports this module.
+        from .entity import AtomStructure
+
+        array = AtomStructure.from_any(target).array
+        coord = getattr(array, "coord", None)
     if coord is not None and np.asarray(coord).ndim == 3:
         array = array[0]
     return array
@@ -1639,7 +1659,7 @@ def select(
 
     Parameters
     ----------
-    target : AtomArray, AtomArrayStack, Molecule, or AtomStructure
+    target : AtomArray, AtomArrayStack, Molecule, AtomStructure, or bpy.types.Object
         Structure to select from.
     selection : str, Selection, or numpy.ndarray
         A selection string, a pre-compiled selection, a boolean mask, or an
@@ -1687,7 +1707,7 @@ def select_indices(
 
     Parameters
     ----------
-    target : AtomArray, AtomArrayStack, Molecule, or AtomStructure
+    target : AtomArray, AtomArrayStack, Molecule, AtomStructure, or bpy.types.Object
         Structure to select from.
     selection : str, Selection, or numpy.ndarray
         See :func:`select`.
@@ -1722,7 +1742,7 @@ def expand_selection(
 
     Parameters
     ----------
-    target : AtomArray, AtomArrayStack, Molecule, or AtomStructure
+    target : AtomArray, AtomArrayStack, Molecule, AtomStructure, or bpy.types.Object
         Structure to select from.
     selection : str, Selection, or numpy.ndarray
         What to expand. See :func:`select`.
@@ -1793,7 +1813,7 @@ def describe_selection(
 
     Parameters
     ----------
-    target : AtomArray, AtomArrayStack, Molecule, or AtomStructure
+    target : AtomArray, AtomArrayStack, Molecule, AtomStructure, or bpy.types.Object
         Structure the selection refers to.
     selection : str, Selection, or numpy.ndarray
         Usually a boolean mask. See :func:`select`.

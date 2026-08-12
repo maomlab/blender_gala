@@ -149,6 +149,11 @@ def set_origin_to_geometry(
         Additionally place the object at the world origin. This is what you
         want before setting up a camera and light rig, and is why
         :func:`~blender_gala.scene.setup.publication_setup` passes ``True``.
+        Everything whose position only means something *relative to this
+        molecule* travels with it — the scene's other molecules, and the
+        labels, measurements and interactions drawn on them — so a complex
+        stays a complex and a distance still spans the atoms it measures.
+        See :func:`_travelling_with`.
 
     Returns
     -------
@@ -231,12 +236,124 @@ def set_origin_to_geometry(
     obj.matrix_world.translation = obj.matrix_world.translation + offset
 
     if move_to_world_origin:
+        # Placing this object at the world origin is a change of frame, not a
+        # change of geometry: whatever it was in contact with has to come with
+        # it, or the closest approach between a protein and its separately
+        # imported ligand silently changes and every contact in the figure is
+        # false. The compensation applied just above is exactly what has to be
+        # undone, so the delta is the translation it produced.
+        delta = -obj.matrix_world.translation
+        for companion in _travelling_with(obj):
+            _translate(companion, delta)
         obj.matrix_world.translation = Vector((0.0, 0.0, 0.0))
 
     if obj.data is not None:
         obj.data.update_tag()
     bpy_mod.context.view_layer.update()
     return np.array(obj.matrix_world.translation)
+
+
+def _travelling_with(target: Any) -> list[Any]:
+    """Everything that has to move when ``target`` moves to the world origin.
+
+    Two kinds of object are placed *relative to a molecule* rather than in the
+    scene for their own sake: the other molecules — a ligand imported from its
+    own file sits where it does only because the protein sits where it does —
+    and the annotations Gala draws onto atoms. Neither knows it is following
+    anything, so both have to be carried explicitly.
+
+    The camera, the lights and anything else in the scene deliberately stay
+    where they are: bringing the subject to a rig built about the origin is
+    what ``move_to_world_origin`` is for.
+
+    Parameters
+    ----------
+    target : bpy.types.Object
+        The object being moved, which is excluded from the result.
+
+    Returns
+    -------
+    list of bpy.types.Object
+        Objects to translate, parents only — a child is carried by its parent
+        and would otherwise move twice.
+    """
+    from ..core import collections as gala_collections
+
+    scene = bpy.context.scene
+    if scene is None:  # pragma: no cover - no scene means nothing to carry
+        return []
+
+    drawn_on_molecules = {
+        gala_collections.LABELS,
+        gala_collections.MEASUREMENTS,
+        gala_collections.INTERACTIONS,
+    }
+    molecules = {obj.name for obj in _molecule_objects()}
+
+    found: list[Any] = []
+    for obj in scene.objects:
+        if obj.name == target.name:
+            continue
+        # A linked object cannot be transformed at all, so it is left where it
+        # is rather than half-moved; a child follows its parent by itself.
+        if obj.parent is not None or getattr(obj, "library", None) is not None:
+            continue
+        annotation = bool(obj.get("gala")) and any(
+            collection.name in drawn_on_molecules for collection in obj.users_collection
+        )
+        if annotation or obj.name in molecules:
+            found.append(obj)
+    return found
+
+
+def _molecule_objects() -> list[Any]:
+    """Every object Molecular Nodes currently tracks as a molecule.
+
+    Read from the Molecular Nodes session rather than from the scene, because
+    a molecule is not distinguishable from any other mesh by looking at it.
+    An entity whose object has been deleted raises rather than answering, and
+    a session that is not there at all is simply no molecules.
+    """
+    from ..core import mn as mn_bridge
+
+    module = mn_bridge.get_mn()
+    if module is None:
+        return []
+    try:
+        molecules = list(module.session.get_session().molecules.values())
+    except Exception:  # pragma: no cover - depends on MN being registered
+        return []
+
+    found = []
+    for molecule in molecules:
+        try:
+            obj = molecule.object
+        except Exception:
+            continue
+        if obj is not None:
+            found.append(obj)
+    return found
+
+
+def _translate(obj: Any, delta: Any) -> None:
+    """Move ``obj`` in world space, keeping the world-space notes it carries.
+
+    A label records the point it was drawn at and a measurement the points it
+    was measured between, both in world space and both used when the scene is
+    written out as a session. Moving the object without them would leave the
+    export pointing at where the atoms used to be.
+    """
+    obj.matrix_world.translation = obj.matrix_world.translation + delta
+
+    shift = np.asarray(delta[:], dtype=float)
+    for key in ("gala_anchor", "gala_points"):
+        recorded = obj.get(key)
+        if recorded is None:
+            continue
+        values = np.asarray(list(recorded), dtype=float)
+        if values.size % 3:
+            continue
+        obj[key] = list((values.reshape(-1, 3) + shift).reshape(-1))
 
 
 def _mesh_positions(obj: Any) -> np.ndarray:

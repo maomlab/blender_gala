@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 
 from ..core.entity import AtomStructure, ReducePolicy
+from ..core.exceptions import StructureError
 
 __all__ = [
     "Measurement",
@@ -102,8 +103,58 @@ def _resolve_points(
 
 
 def _angstrom(structure: AtomStructure, points: np.ndarray) -> np.ndarray:
-    """Convert world-space Blender-unit points to ångström for measurement."""
-    return points / structure.world_scale
+    """Convert world-space Blender-unit points to ångström in the molecule's frame.
+
+    A bond length is a property of the molecule, not of how the object is
+    displayed. Dividing world units by the world scale knows nothing about
+    ``matrix_world``, so scaling an object to fit a layout scaled the answer
+    with it — a 1.414 Å bond read as 2.828 Å at ``scale=(2, 2, 2)`` and an
+    angle of 115.35° as 61.46° at ``scale=(3, 1, 1)`` — and mirroring an object
+    flipped the sign of a dihedral, which is the whole point of reporting one.
+    Meanwhile ``find_interactions`` measures on ``structure.coord``, so the two
+    disagreed about the same molecule.
+
+    Taking the object's own transform back out first leaves the coordinates the
+    chemistry was read in, whatever that transform is: a rotation or a
+    translation cancelled out of a difference already, so nothing that was
+    correct before moves.
+
+    Parameters
+    ----------
+    structure : AtomStructure
+        The structure the points came from.
+    points : numpy.ndarray
+        Shape ``(n, 3)`` of world-space points, in Blender units.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(n, 3)`` in ångström, in the structure's own frame.
+
+    Raises
+    ------
+    StructureError
+        If the object's transform cannot be inverted — a zero scale on an axis
+        collapses the molecule onto a plane, and a length read off it would be
+        a shadow's rather than a bond's.
+    """
+    scale = structure.world_scale
+    obj = structure.object
+    if obj is None:
+        return points / scale
+
+    matrix = np.array(obj.matrix_world, dtype=float).reshape(4, 4)
+    try:
+        inverse = np.linalg.inv(matrix)
+    except np.linalg.LinAlgError as exc:
+        raise StructureError(
+            f"{structure.name!r} has a transform that cannot be inverted, so its "
+            "atoms have no position in the molecule's own frame to measure "
+            "between. An object scale of zero on one axis is the usual cause."
+        ) from exc
+
+    homogeneous = np.hstack([points, np.ones((points.shape[0], 1))])
+    return (homogeneous @ inverse.T)[:, :3] / scale
 
 
 def distance(
@@ -144,6 +195,8 @@ def distance(
         If a selection matched no atoms.
     AmbiguousSelectionError
         If a selection matched several atoms under ``reduce="single"``.
+    StructureError
+        If the object's transform cannot be inverted. See :func:`_angstrom`.
     """
     structure = AtomStructure.from_any(target)
     atoms, points, labels = _resolve_points(
@@ -189,6 +242,8 @@ def angle(
     ------
     ValueError
         If two of the points coincide, leaving the angle undefined.
+    StructureError
+        If the object's transform cannot be inverted. See :func:`_angstrom`.
     """
     structure = AtomStructure.from_any(target)
     atoms, points, labels = _resolve_points(
@@ -250,6 +305,8 @@ def dihedral(
     ------
     ValueError
         If the four atoms are collinear, leaving the torsion undefined.
+    StructureError
+        If the object's transform cannot be inverted. See :func:`_angstrom`.
     """
     structure = AtomStructure.from_any(target)
     atoms, points, labels = _resolve_points(
